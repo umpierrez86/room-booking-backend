@@ -10,14 +10,31 @@ import jwt
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
+from app.adapters.persistence.room_catalog_sql import SqlRoomCatalog
+from app.adapters.persistence.sql_booking_repo import SqlBookingRepository
 from app.adapters.persistence.sql_user_repo import SqlUserRepository
+from app.adapters.system_clock import SystemClock
 from app.core.config import settings
 from app.core.db import get_session
 from app.core.security import decode_token
 from app.domain.services.auth_service import AuthService
+from app.domain.services.booking_service import BookingService
+from app.domain.timeutils import parse_hhmm
 
 BEARER_PREFIX = "Bearer "
 HTTP_UNAUTHORIZED = 401
+
+
+def get_booking_service(session: Session = Depends(get_session)) -> BookingService:
+    """Build a `BookingService` wired to SQL-backed ports and the system clock."""
+    return BookingService(
+        SqlBookingRepository(session),
+        SqlRoomCatalog(session),
+        SystemClock(),
+        settings.app_timezone,
+        parse_hhmm(settings.booking_start),
+        parse_hhmm(settings.booking_end),
+    )
 
 
 def get_auth_service(session: Session = Depends(get_session)) -> AuthService:

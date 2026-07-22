@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.web import errors_handler
-from app.adapters.web.routers import auth
+from app.adapters.web.routers import auth, bookings, rooms
 from app.core.config import settings
 from app.core.startup import run_startup
 
@@ -30,6 +30,8 @@ def create_app() -> FastAPI:
     )
     errors_handler.register(app)
     app.include_router(auth.router)
+    app.include_router(rooms.router)
+    app.include_router(bookings.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

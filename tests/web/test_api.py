@@ -17,6 +17,7 @@ from tests.fakes import (
     InMemoryBookingRepository,
     InMemoryRoomCatalog,
     InMemoryUserRepository,
+    SpyMetrics,
 )
 
 TZ = "America/Montevideo"
@@ -31,7 +32,7 @@ def client_with_fakes() -> tuple[TestClient, User]:
     app = create_app()
     bookings = InMemoryBookingRepository()
     booking_service = BookingService(
-        bookings, InMemoryRoomCatalog(ROOMS), FixedClock(NOW), TZ, OPEN_TIME, CLOSE_TIME
+        bookings, InMemoryRoomCatalog(ROOMS), FixedClock(NOW), SpyMetrics(), TZ, OPEN_TIME, CLOSE_TIME
     )
     auth_service = AuthService(InMemoryUserRepository([USER]))
     app.dependency_overrides[deps.get_booking_service] = lambda: booking_service

@@ -26,15 +26,17 @@ from app.adapters.agent.guard import make_guard
 from app.adapters.agent.tools import make_tools
 from app.core.config import settings
 
-# The single compiled graph reused across requests. Set once during the app
-# lifespan (Postgres-backed), or built lazily with a `MemorySaver` fallback.
+# The checkpointer is installed during the app lifespan. The graph itself is
+# still compiled lazily so a slow or unavailable LLM provider cannot block
+# application startup.
 _graph: CompiledStateGraph | None = None
+_checkpointer: BaseCheckpointSaver | None = None
 
 
 @lru_cache(maxsize=1)
 def _get_llm() -> BaseChatModel:
     """Build the chat model on first use (requires `GOOGLE_API_KEY`)."""
-    return init_chat_model(settings.llm_model)
+    return init_chat_model(settings.llm_model, max_retries=0)
 
 
 def compile_graph(
@@ -55,12 +57,18 @@ def set_graph(graph: CompiledStateGraph) -> None:
     _graph = graph
 
 
+def set_checkpointer(checkpointer: BaseCheckpointSaver) -> None:
+    """Install the saver that the lazily compiled graph will use."""
+    global _checkpointer
+    _checkpointer = checkpointer
+
+
 def get_graph() -> CompiledStateGraph:
     """Return the reused compiled graph, lazily building a `MemorySaver`-backed
     one if the lifespan never installed a checkpointed graph (local fallback)."""
     global _graph
     if _graph is None:
-        _graph = compile_graph(MemorySaver())
+        _graph = compile_graph(_checkpointer or MemorySaver())
     return _graph
 
 
@@ -92,8 +100,12 @@ async def lifespan_graph() -> AsyncIterator[None]:
 
         async with AsyncPostgresSaver.from_conn_string(_pg_conn_string()) as saver:
             await saver.setup()
-            set_graph(compile_graph(saver))
+            set_checkpointer(saver)
             yield
     else:
-        set_graph(compile_graph(MemorySaver()))
+        set_checkpointer(MemorySaver())
         yield
+
+    global _graph, _checkpointer
+    _graph = None
+    _checkpointer = None

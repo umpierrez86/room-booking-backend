@@ -8,12 +8,13 @@ checkpoint thread to that user via `thread_id`, so a turn sees the messages
 of the previous turns in the same conversation.
 """
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from enum import StrEnum
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -24,17 +25,22 @@ from app.adapters.agent import runtime
 from app.adapters.agent.graph import AGENT_NODE, GUARD_NODE, TOOLS_NODE
 from app.adapters.agent.tools import BOOKING_CANCELLED_MESSAGE, BOOKING_CREATED_PREFIX
 from app.adapters.web.deps import get_booking_service, get_current_user
+from app.core.config import settings
 from app.domain.services.booking_service import BookingService
+
+logger = logging.getLogger(__name__)
 
 SSE_MEDIA_TYPE = "text/event-stream"
 BOOKING_MUTATING_TOOLS = frozenset({"create_booking", "cancel_booking"})
 BOOKING_SUCCESS_MARKERS = (BOOKING_CREATED_PREFIX, BOOKING_CANCELLED_MESSAGE)
+CHAT_NOT_CONFIGURED_MESSAGE = "El asistente no está disponible por el momento."
+CHAT_GENERATION_FAILED_MESSAGE = "No pude completar la respuesta en este momento. Probá de nuevo en unos minutos."
 
-StreamMode = Literal["messages", "updates"]
+StreamMode = Literal["custom", "updates"]
 # NOTE: langgraph only treats stream_mode as *multi-mode* (yielding
 # `(mode, payload)` pairs) when it is a `list`; a tuple is interpreted as a
 # single mode spec, which silently drops the mode label and breaks unpacking.
-GRAPH_STREAM_MODES: Sequence[StreamMode] = ["messages", "updates"]
+GRAPH_STREAM_MODES: Sequence[StreamMode] = ["custom", "updates"]
 
 
 class ChatEventType(StrEnum):
@@ -67,13 +73,21 @@ async def chat(
     `uid` comes from the verified JWT and is injected into
     `config["configurable"]["user_id"]`; it is never read from `body`.
     """
+    if not settings.google_api_key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, CHAT_NOT_CONFIGURED_MESSAGE)
     return StreamingResponse(_stream_turn(body.message, uid, svc), media_type=SSE_MEDIA_TYPE)
 
 
 async def _stream_turn(message: str, uid: uuid.UUID, svc: BookingService) -> AsyncIterator[str]:
     """Run one turn on the reused, checkpointed graph, yielding SSE events."""
-    async for event in _stream_graph_events(runtime.get_graph(), message, uid, svc):
-        yield event
+    try:
+        async for event in _stream_graph_events(runtime.get_graph(), message, uid, svc):
+            yield event
+    except Exception:
+        # The HTTP response has already started, so communicate provider failures as SSE.
+        logger.exception("Chat generation failed")
+        yield _sse(ChatEventType.TOKEN, text=CHAT_GENERATION_FAILED_MESSAGE)
+        yield _sse(ChatEventType.DONE)
 
 
 async def _stream_graph_events(
@@ -108,22 +122,17 @@ def _events_for(mode: StreamMode, payload: Any) -> list[str]:
     `astream`'s multi-mode overload only widens to `dict[str, Any] | Any` in
     langgraph's stubs; each mode's real shape is asserted here.
     """
-    if mode == "messages":
-        return _message_event(payload)
+    if mode == "custom":
+        return _custom_events(payload)
     return _update_events(cast("dict[str, dict[str, list[BaseMessage]]]", payload))
 
 
-def _message_event(payload: Any) -> list[str]:
-    """Turn one `messages`-mode chunk into `token` events from the agent node.
-
-    `payload` is typed `Any`: `astream(..., stream_mode=[...])` (multi-mode)
-    only widens to `dict[str, Any] | Any` in langgraph's own type stubs, so
-    each mode's shape is validated here rather than at the call site.
-    """
-    message, metadata = payload
-    if metadata.get("langgraph_node") != AGENT_NODE or not message.text:
+def _custom_events(payload: Any) -> list[str]:
+    """Turn text forwarded by the agent node into token SSE events."""
+    if not isinstance(payload, dict) or payload.get("type") != "token":
         return []
-    return [_sse(ChatEventType.TOKEN, text=message.text)]
+    text = payload.get("text")
+    return [_sse(ChatEventType.TOKEN, text=text)] if isinstance(text, str) and text else []
 
 
 def _update_events(payload: dict[str, dict[str, list[BaseMessage]]]) -> list[str]:

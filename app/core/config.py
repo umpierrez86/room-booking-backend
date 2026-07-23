@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     booking_end: str = "20:00"
     jwt_expire_hours: int = 8
     google_api_key: str = ""
-    llm_model: str = "google_genai:gemini-2.0-flash"
+    llm_model: str = "google_genai:gemini-3.1-flash-lite"
     cors_origins: str = "*"
+    seed_demo_users: bool = False
     testing: bool = False
 
 

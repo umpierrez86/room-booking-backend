@@ -1,60 +1,49 @@
-"""Database initialization and idempotent demo-data seeding.
+"""Database migration and idempotent demo-data seeding.
 
 Run once at application startup (see the `lifespan` in
-`app.adapters.web.main`): creates the schema if missing, then seeds the
-fixed room catalog and the two demo users, skipping rows that already
-exist so re-running it is a no-op.
+`app.adapters.web.main`): brings the schema up to date by running the
+Alembic migrations, then seeds the fixed room catalog and the two demo
+users, skipping rows that already exist so re-running it is a no-op.
+
+The tests do not go through here: their fixtures build the schema directly
+with `Base.metadata.create_all` on in-memory SQLite.
 """
 import os
+from pathlib import Path
 
-from sqlalchemy import Engine, select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.persistence.orm import Base, RoomORM, UserORM
-from app.core.db import SessionLocal, engine
+from alembic import command
+from alembic.config import Config
+from app.adapters.persistence.orm import RoomORM, UserORM
+from app.core.db import SessionLocal
 from app.core.security import hash_password
 
 ROOM_CAPACITIES = {"A": 4, "B": 6, "C": 6, "D": 8, "E": 10}
 DEFAULT_DEMO_PASSWORD = "demo1234"
 DEMO_USERS = (("User1", "USER1_PASSWORD"), ("User2", "USER2_PASSWORD"))
-POSTGRES_DIALECT = "postgresql"
-NO_OVERLAP_CONSTRAINT = "bookings_no_overlap"
 
-# Postgres-only barrier against double-booking (TOCTOU): even if two concurrent
-# requests both pass the service-level overlap check, this exclusion constraint
-# lets at most one succeed. `btree_gist` is required for the `=` operator on
-# `room_code` inside a GiST exclusion. Wrapped in a DO block so re-running
-# startup is idempotent (older Postgres has no `ADD CONSTRAINT IF NOT EXISTS`).
-_ENABLE_BTREE_GIST = "CREATE EXTENSION IF NOT EXISTS btree_gist;"
-_ADD_NO_OVERLAP_CONSTRAINT = f"""
-DO $$
-BEGIN
-    ALTER TABLE bookings ADD CONSTRAINT {NO_OVERLAP_CONSTRAINT}
-        EXCLUDE USING gist (room_code WITH =, tstzrange(starts_at, ends_at) WITH &&);
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-"""
+# Project root holds `alembic.ini`; resolve it absolutely so migrations run
+# regardless of the process's working directory.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ALEMBIC_INI = _PROJECT_ROOT / "alembic.ini"
 
 
 def init_db() -> None:
-    """Create every table declared under `Base`, if it does not exist yet."""
-    Base.metadata.create_all(engine)
-    _apply_no_overlap_constraint(engine)
+    """Bring the schema up to date by running Alembic migrations to head.
 
-
-def _apply_no_overlap_constraint(bound_engine: Engine) -> None:
-    """Install the Postgres exclusion constraint that blocks overlapping bookings.
-
-    Skipped on any non-Postgres dialect (the smoke tests run on in-memory
-    SQLite, which supports neither `btree_gist` nor GiST exclusion constraints);
-    the service-level overlap check remains the sole barrier there.
+    The Postgres-only anti-overlap exclusion constraint lives inside the
+    migration, so it is applied here too (and skipped on other dialects).
     """
-    if bound_engine.dialect.name != POSTGRES_DIALECT:
-        return
-    with bound_engine.begin() as connection:
-        connection.execute(text(_ENABLE_BTREE_GIST))
-        connection.execute(text(_ADD_NO_OVERLAP_CONSTRAINT))
+    command.upgrade(_alembic_config(), "head")
+
+
+def _alembic_config() -> Config:
+    """Build an Alembic `Config` bound to the project's migration scripts."""
+    config = Config(str(_ALEMBIC_INI))
+    config.set_main_option("script_location", str(_PROJECT_ROOT / "alembic"))
+    return config
 
 
 def seed(session: Session) -> None:

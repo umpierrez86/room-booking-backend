@@ -25,12 +25,12 @@ class TokenResponse(BaseModel):
 
 
 class BookingCreate(BaseModel):
-    """Payload to create a booking. `start`/`end` are local `HH:MM` strings."""
+    """Payload to create a booking. `start`/`end` are local ISO times."""
 
     room: str
     date: dt.date
-    start: str
-    end: str
+    start: dt.time
+    end: dt.time
     title: str = Field(min_length=MIN_TITLE_LENGTH)
     attendees: int = Field(ge=MIN_ATTENDEES)
 

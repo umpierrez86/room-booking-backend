@@ -27,7 +27,7 @@ def make_service() -> BookingService:
 def test_create_tool_uses_injected_user() -> None:
     uid = uuid.uuid4()
     svc = make_service()
-    tools = {t.name: t for t in make_tools(svc, lambda: uid)}
+    tools = {t.name: t for t in make_tools(lambda: svc, lambda: uid)}
     out = tools["create_booking"].invoke(
         {"room": "C", "date": "2026-07-21", "start": "10:00", "end": "11:30", "title": "x", "attendees": 6}
     )
@@ -36,7 +36,7 @@ def test_create_tool_uses_injected_user() -> None:
 
 def test_create_tool_returns_domain_error_message() -> None:
     svc = make_service()
-    tools = {t.name: t for t in make_tools(svc, lambda: uuid.uuid4())}
+    tools = {t.name: t for t in make_tools(lambda: svc, lambda: uuid.uuid4())}
     out = tools["create_booking"].invoke(
         {"room": "A", "date": "2026-07-21", "start": "10:00", "end": "11:00", "title": "x", "attendees": 5}
     )

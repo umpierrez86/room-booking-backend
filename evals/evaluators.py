@@ -1,4 +1,23 @@
 """Pure, testable evaluators for agent eval runs (no LLM calls)."""
+import re
+
+MIN_SCORE = 0.0
+MAX_SCORE = 1.0
+_NUMBER_PATTERN = re.compile(r"[-+]?\d*\.?\d+")
+
+
+def parse_judge_score(text: str) -> float:
+    """Extract a 0..1 quality score from the judge LLM's free-text reply.
+
+    The judge is asked to answer with a single number, but LLMs often wrap it
+    in prose ("Score: 0.8"). This takes the first numeric token found and
+    clamps it to `[MIN_SCORE, MAX_SCORE]`, falling back to `MIN_SCORE` when the
+    reply has no parseable number.
+    """
+    match = _NUMBER_PATTERN.search(text)
+    if match is None:
+        return MIN_SCORE
+    return max(MIN_SCORE, min(MAX_SCORE, float(match.group())))
 
 
 def tool_match(run_tool_calls: list[dict], expected_tool: str, expected_args: dict) -> bool:

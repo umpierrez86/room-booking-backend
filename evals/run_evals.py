@@ -14,7 +14,8 @@ from collections.abc import Callable
 from typing import Any
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage
 from langsmith import Client
 from langsmith.evaluation import evaluate
 
@@ -28,7 +29,7 @@ from app.domain import timeutils as tu
 from app.domain.entities import Room
 from app.domain.services.booking_service import BookingService
 from evals.dataset import CASES
-from evals.evaluators import tool_match
+from evals.evaluators import parse_judge_score, tool_match
 from tests.fakes import InMemoryBookingRepository, InMemoryRoomCatalog
 
 DATASET_NAME = "room-booking-agent"
@@ -37,7 +38,19 @@ EXPERIMENT_PREFIX = "tool-match"
 ROOM_CAPACITIES = {"A": 4, "B": 6, "C": 6, "D": 8, "E": 10}
 EVAL_THREAD_ID = "eval"
 
+# LLM-as-judge rubric: scores the agent's final answer on clarity, correctness
+# and on-topic-ness for room bookings. Kept terse and asks for a bare number so
+# `parse_judge_score` has the least to disambiguate.
+JUDGE_PROMPT = (
+    "Sos un evaluador de calidad de un asistente de reservas de salas. "
+    "Puntuá la RESPUESTA del asistente frente al PEDIDO del usuario: "
+    "¿es clara, correcta y on-topic sobre reservas de salas? "
+    "Respondé SOLO con un número entre 0 y 1 (1 = excelente, 0 = mala).\n\n"
+    "PEDIDO:\n{input}\n\nRESPUESTA:\n{response}\n\nPuntaje:"
+)
+
 Target = Callable[[dict[str, Any]], dict[str, Any]]
+Evaluator = Callable[[Any, Any], dict[str, Any]]
 
 
 def _seeded_service() -> BookingService:
@@ -64,9 +77,15 @@ def _make_target(svc: BookingService, user_id: uuid.UUID) -> Target:
             for message in result["messages"]
             for call in getattr(message, "tool_calls", None) or []
         ]
-        return {"tool_calls": calls}
+        return {"tool_calls": calls, "response": _message_text(result["messages"][-1])}
 
     return target
+
+
+def _message_text(message: BaseMessage) -> str:
+    """Return a message's text content, whatever its content shape."""
+    text = getattr(message, "text", None)
+    return text() if callable(text) else str(text or message.content)
 
 
 def correct_tool(run: Any, example: Any) -> dict[str, Any]:
@@ -75,6 +94,19 @@ def correct_tool(run: Any, example: Any) -> dict[str, Any]:
         run.outputs["tool_calls"], example.outputs["expected_tool"], example.outputs["expected_args"]
     )
     return {"key": "correct_tool", "score": 1.0 if ok else 0.0}
+
+
+def _make_response_quality(judge: BaseChatModel) -> Evaluator:
+    """Build an LLM-as-judge evaluator scoring the agent's final response 0..1."""
+
+    def response_quality(run: Any, example: Any) -> dict[str, Any]:
+        prompt = JUDGE_PROMPT.format(
+            input=example.inputs["input"], response=run.outputs["response"]
+        )
+        reply = judge.invoke([HumanMessage(content=prompt)])
+        return {"key": "response_quality", "score": parse_judge_score(_message_text(reply))}
+
+    return response_quality
 
 
 def _ensure_dataset(client: Client) -> None:
@@ -98,7 +130,14 @@ def run_evals() -> None:
     _ensure_dataset(client)
     svc = _seeded_service()
     target = _make_target(svc, uuid.uuid4())
-    evaluate(target, data=DATASET_NAME, evaluators=[correct_tool], client=client, experiment_prefix=EXPERIMENT_PREFIX)
+    response_quality = _make_response_quality(init_chat_model(settings.llm_model))
+    evaluate(
+        target,
+        data=DATASET_NAME,
+        evaluators=[correct_tool, response_quality],
+        client=client,
+        experiment_prefix=EXPERIMENT_PREFIX,
+    )
 
 
 if __name__ == "__main__":

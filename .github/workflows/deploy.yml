@@ -35,6 +35,9 @@ jobs:
 
   smoke:
     needs: deploy
+    # The first deployment creates the service that will later receive its
+    # public domain, so there is no URL to probe until that bootstrap is done.
+    if: ${{ vars.PRODUCTION_URL != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Health check

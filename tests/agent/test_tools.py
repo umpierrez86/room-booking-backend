@@ -5,7 +5,7 @@ import uuid
 from app.adapters.agent.tools import make_tools
 from app.domain.entities import Room
 from app.domain.services.booking_service import BookingService
-from tests.fakes import FixedClock, InMemoryBookingRepository, InMemoryRoomCatalog
+from tests.fakes import FixedClock, InMemoryBookingRepository, InMemoryRoomCatalog, SpyMetrics
 
 ROOMS = [Room("A", 4), Room("B", 6), Room("C", 6), Room("D", 8), Room("E", 10)]
 NOW = dt.datetime(2026, 7, 20, 12, tzinfo=dt.timezone.utc)
@@ -17,6 +17,7 @@ def make_service() -> BookingService:
         InMemoryBookingRepository(),
         InMemoryRoomCatalog(ROOMS),
         FixedClock(NOW),
+        SpyMetrics(),
         "America/Montevideo",
         dt.time(8, 0),
         dt.time(20, 0),

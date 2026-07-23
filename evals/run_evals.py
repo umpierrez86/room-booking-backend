@@ -22,6 +22,7 @@ from app.adapters.agent.graph import build_graph
 from app.adapters.agent.guard import make_guard
 from app.adapters.agent.tools import make_tools
 from app.adapters.system_clock import SystemClock
+from app.adapters.web.metrics import NoOpMetrics
 from app.core.config import settings
 from app.domain import timeutils as tu
 from app.domain.entities import Room
@@ -43,7 +44,7 @@ def _seeded_service() -> BookingService:
     """Build a `BookingService` over in-memory fakes seeded with rooms A-E."""
     rooms = [Room(code, capacity) for code, capacity in ROOM_CAPACITIES.items()]
     return BookingService(
-        InMemoryBookingRepository(), InMemoryRoomCatalog(rooms), SystemClock(),
+        InMemoryBookingRepository(), InMemoryRoomCatalog(rooms), SystemClock(), NoOpMetrics(),
         settings.app_timezone, tu.parse_hhmm(settings.booking_start), tu.parse_hhmm(settings.booking_end),
     )
 

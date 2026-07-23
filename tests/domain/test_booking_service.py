@@ -7,7 +7,7 @@ import pytest
 from app.domain.entities import Room
 from app.domain.errors import CapacityExceeded, NotOwner, Overlap, RoomNotFound
 from app.domain.services.booking_service import BookingService
-from tests.fakes import FixedClock, InMemoryBookingRepository, InMemoryRoomCatalog
+from tests.fakes import FixedClock, InMemoryBookingRepository, InMemoryRoomCatalog, SpyMetrics
 
 TZ = "America/Montevideo"
 OPEN, CLOSE = dt.time(8, 0), dt.time(20, 0)
@@ -18,8 +18,14 @@ D = dt.date(2026, 7, 21)
 
 def make() -> BookingService:
     """Build a `BookingService` wired with in-memory fakes."""
+    return make_with_metrics(SpyMetrics())
+
+
+def make_with_metrics(metrics: SpyMetrics) -> BookingService:
+    """Build a `BookingService` over in-memory fakes with the given metrics spy."""
     return BookingService(
-        InMemoryBookingRepository(), InMemoryRoomCatalog(ROOMS), FixedClock(NOW), TZ, OPEN, CLOSE
+        InMemoryBookingRepository(), InMemoryRoomCatalog(ROOMS), FixedClock(NOW), metrics, TZ,
+        OPEN, CLOSE,
     )
 
 
@@ -74,3 +80,30 @@ def test_schedule_free_blocks() -> None:
     schedule = svc.schedule("C", D)
     assert len(schedule["occupied"]) == 1
     assert (dt.time(8, 0), dt.time(10, 0)) in schedule["free"]
+
+
+def test_create_records_booking_created() -> None:
+    metrics = SpyMetrics()
+    make_with_metrics(metrics).create(uuid.uuid4(), "C", D, dt.time(10, 0), dt.time(11, 0), "x", 2)
+    assert metrics.created == 1
+    assert metrics.overlaps == 0
+
+
+def test_overlap_records_overlap_rejected() -> None:
+    metrics = SpyMetrics()
+    svc = make_with_metrics(metrics)
+    owner = uuid.uuid4()
+    svc.create(owner, "C", D, dt.time(10, 0), dt.time(11, 0), "x", 2)
+    with pytest.raises(Overlap):
+        svc.create(owner, "C", D, dt.time(10, 30), dt.time(11, 30), "y", 2)
+    assert metrics.overlaps == 1
+    assert metrics.created == 1  # only the first booking succeeded
+
+
+def test_cancel_records_booking_cancelled() -> None:
+    metrics = SpyMetrics()
+    svc = make_with_metrics(metrics)
+    owner = uuid.uuid4()
+    booking = svc.create(owner, "C", D, dt.time(10, 0), dt.time(11, 0), "x", 2)
+    svc.cancel(owner, booking.id)
+    assert metrics.cancelled == 1

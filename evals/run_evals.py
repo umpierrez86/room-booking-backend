@@ -65,12 +65,20 @@ def _seeded_service() -> BookingService:
 def _make_target(svc: BookingService, user_id: uuid.UUID) -> Target:
     """Build a LangSmith target: runs one agent turn, returns its tool calls."""
     llm = init_chat_model(settings.llm_model)
-    graph = build_graph(llm, make_tools(svc, lambda: user_id), checkpointer=None, guard=make_guard())
+    graph = build_graph(
+        llm, make_tools(lambda: svc, lambda: user_id), checkpointer=None, guard=make_guard()
+    )
 
     def target(inputs: dict[str, Any]) -> dict[str, Any]:
         result = graph.invoke(
             {"messages": [HumanMessage(content=inputs["input"])]},
-            config={"configurable": {"user_id": str(user_id), "thread_id": EVAL_THREAD_ID}},
+            config={
+                "configurable": {
+                    "user_id": str(user_id),
+                    "thread_id": EVAL_THREAD_ID,
+                    "booking_service": svc,
+                }
+            },
         )
         calls = [
             {"name": call["name"], "args": call["args"]}

@@ -1,9 +1,11 @@
 """Tests for the agent's LangChain tools, exercised through fakes."""
 import datetime as dt
 import uuid
+from unittest.mock import patch
 
 from app.adapters.agent.tools import make_tools
 from app.domain.entities import Room
+from app.domain.errors import DomainError
 from app.domain.services.booking_service import BookingService
 from tests.fakes import FixedClock, InMemoryBookingRepository, InMemoryRoomCatalog, SpyMetrics
 
@@ -47,8 +49,9 @@ def test_availability_tool_returns_domain_error_message() -> None:
     svc = make_service()
     tools = {t.name: t for t in make_tools(lambda: svc, lambda: uuid.uuid4())}
 
-    out = tools["list_available_rooms"].invoke(
-        {"date": "2026-07-17", "start": "10:00", "end": "11:00", "attendees": 4}
-    )
+    with patch.object(svc, "availability", side_effect=DomainError("El horario ya pasó.")):
+        out = tools["list_available_rooms"].invoke(
+            {"date": "2026-07-17", "start": "10:00", "end": "11:00", "attendees": 4}
+        )
 
     assert "pasado" in out.lower()

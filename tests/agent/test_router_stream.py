@@ -11,7 +11,8 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
 from app.adapters.agent.graph import build_graph
-from app.adapters.agent.router import ChatEventType, _stream_graph_events
+from app.adapters.agent import router
+from app.adapters.agent.router import CHAT_GENERATION_FAILED_MESSAGE, ChatEventType, _stream_graph_events, _stream_turn
 
 REJECTION = "Solo puedo ayudarte con reservas de salas."
 
@@ -45,3 +46,20 @@ async def test_allowed_prompt_streams_agent_tokens_then_done() -> None:
     tokens = [e for e in events if e["type"] == ChatEventType.TOKEN]
     assert "".join(t["text"] for t in tokens) == "Hola, te ayudo con reservas"
     assert events[-1]["type"] == ChatEventType.DONE
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_reports_provider_failures_as_sse(monkeypatch) -> None:
+    def fail_graph():
+        raise RuntimeError("quota exhausted")
+
+    monkeypatch.setattr(router.runtime, "get_graph", fail_graph)
+    events = [
+        json.loads(chunk.removeprefix("data: ").strip())
+        async for chunk in _stream_turn("hola", uuid.uuid4(), object())
+    ]
+
+    assert events == [
+        {"type": ChatEventType.TOKEN, "text": CHAT_GENERATION_FAILED_MESSAGE},
+        {"type": ChatEventType.DONE},
+    ]

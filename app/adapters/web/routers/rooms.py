@@ -56,14 +56,14 @@ def rooms(
 @router.get("/availability", response_model=list[RoomOut])
 def availability(
     date: dt.date,
-    start: str,
-    end: str,
+    start: dt.time,
+    end: dt.time,
     attendees: int = Query(ge=MIN_ATTENDEES),
     _: object = Depends(get_current_user),
     svc: BookingService = Depends(get_booking_service),
 ) -> list[RoomOut]:
     """List rooms with enough capacity and no overlap for the given slot."""
-    free_rooms = svc.availability(date, tu.parse_hhmm(start), tu.parse_hhmm(end), attendees)
+    free_rooms = svc.availability(date, start, end, attendees)
     return [RoomOut(code=r.code, capacity=r.capacity) for r in free_rooms]
 
 

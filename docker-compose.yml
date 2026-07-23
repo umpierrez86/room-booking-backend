@@ -3,8 +3,22 @@ services:
     image: postgres:16
     environment: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: rooms }
     ports: ["5432:5432"]
+    volumes:
+      - room-booking-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rooms"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
   backend:
     build: .
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/rooms
     ports: ["8000:8000"]
-    depends_on: [db]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  room-booking-postgres-data:

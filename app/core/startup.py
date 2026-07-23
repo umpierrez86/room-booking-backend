@@ -2,8 +2,8 @@
 
 Run once at application startup (see the `lifespan` in
 `app.adapters.web.main`): brings the schema up to date by running the
-Alembic migrations, then seeds the fixed room catalog and the two demo
-users, skipping rows that already exist so re-running it is a no-op.
+Alembic migrations, then seeds the fixed room catalog. Demo users are seeded
+only when explicitly enabled for local development.
 
 The tests do not go through here: their fixtures build the schema directly
 with `Base.metadata.create_all` on in-memory SQLite.
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from alembic import command
 from alembic.config import Config
 from app.adapters.persistence.orm import RoomORM, UserORM
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.security import hash_password
 
@@ -46,10 +47,11 @@ def _alembic_config() -> Config:
     return config
 
 
-def seed(session: Session) -> None:
-    """Insert the fixed room catalog and demo users, skipping existing rows."""
+def seed(session: Session, *, include_demo_users: bool = True) -> None:
+    """Insert the fixed room catalog and, optionally, local demo users."""
     _seed_rooms(session)
-    _seed_demo_users(session)
+    if include_demo_users:
+        _seed_demo_users(session)
     session.commit()
 
 
@@ -72,4 +74,4 @@ def run_startup() -> None:
     """Initialize the schema and seed demo data. Called from the app lifespan."""
     init_db()
     with SessionLocal() as session:
-        seed(session)
+        seed(session, include_demo_users=settings.seed_demo_users)

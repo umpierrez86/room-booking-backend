@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.adapters.agent import runtime
 from app.adapters.agent.router import router as chat_router
 from app.adapters.web import errors_handler, metrics
 from app.adapters.web.routers import auth, bookings, health, rooms
@@ -14,10 +15,14 @@ from app.core.startup import run_startup
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Initialize the schema and seed demo data on startup, skipped in tests."""
-    if not settings.testing:
-        run_startup()
-    yield
+    """Initialize schema/seed data and compile the reused, checkpointed agent
+    graph on startup; both are skipped in tests (fixtures build their own)."""
+    if settings.testing:
+        yield
+        return
+    run_startup()
+    async with runtime.lifespan_graph():
+        yield
 
 
 def create_app() -> FastAPI:

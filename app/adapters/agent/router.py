@@ -1,34 +1,29 @@
 """Streaming chat endpoint for the room-booking conversational agent.
 
-The LLM is built lazily, on first use, rather than at import time: eagerly
-constructing it (as `init_chat_model` does) requires a live
-`GOOGLE_API_KEY`, which is unavailable while running the test suite and
-would otherwise break every test that imports `app.adapters.web.main`.
-The checkpointer stays `None` here; a Postgres-backed one (`.setup()` run
-during the app's lifespan) is wired in at integration time.
+The graph is compiled once and reused across requests (see
+`app.adapters.agent.runtime`) so its checkpointer can persist conversation
+state between turns. Each request injects its per-request `BookingService`
+and the acting `user_id` into `config["configurable"]`, and pins the
+checkpoint thread to that user via `thread_id`, so a turn sees the messages
+of the previous turns in the same conversation.
 """
 import json
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from enum import StrEnum
-from functools import lru_cache
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from langchain.chat_models import init_chat_model
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
-from app.adapters.agent import context
-from app.adapters.agent.graph import AGENT_NODE, GUARD_NODE, TOOLS_NODE, build_graph
-from app.adapters.agent.guard import make_guard
-from app.adapters.agent.tools import BOOKING_CANCELLED_MESSAGE, BOOKING_CREATED_PREFIX, make_tools
+from app.adapters.agent import runtime
+from app.adapters.agent.graph import AGENT_NODE, GUARD_NODE, TOOLS_NODE
+from app.adapters.agent.tools import BOOKING_CANCELLED_MESSAGE, BOOKING_CREATED_PREFIX
 from app.adapters.web.deps import get_booking_service, get_current_user
-from app.core.config import settings
 from app.domain.services.booking_service import BookingService
 
 SSE_MEDIA_TYPE = "text/event-stream"
@@ -61,12 +56,6 @@ class ChatIn(BaseModel):
 router = APIRouter(tags=["chat"])
 
 
-@lru_cache(maxsize=1)
-def _get_llm() -> BaseChatModel:
-    """Build the chat model on first use (requires `GOOGLE_API_KEY`)."""
-    return init_chat_model(settings.llm_model)
-
-
 @router.post("/chat")
 async def chat(
     body: ChatIn,
@@ -82,18 +71,28 @@ async def chat(
 
 
 async def _stream_turn(message: str, uid: uuid.UUID, svc: BookingService) -> AsyncIterator[str]:
-    """Run one graph turn, yielding SSE-formatted agent events."""
-    tools = make_tools(svc, context.current_user_id)
-    graph = build_graph(_get_llm(), tools, checkpointer=None, guard=make_guard())
-    async for event in _stream_graph_events(graph, message, uid):
+    """Run one turn on the reused, checkpointed graph, yielding SSE events."""
+    async for event in _stream_graph_events(runtime.get_graph(), message, uid, svc):
         yield event
 
 
 async def _stream_graph_events(
-    graph: CompiledStateGraph, message: str, uid: uuid.UUID
+    graph: CompiledStateGraph,
+    message: str,
+    uid: uuid.UUID,
+    svc: BookingService | None = None,
 ) -> AsyncIterator[str]:
-    """Stream one graph turn as SSE events, ending with a `done` event."""
-    config: RunnableConfig = {"configurable": {"user_id": str(uid), "thread_id": f"user-{uid}"}}
+    """Stream one graph turn as SSE events, ending with a `done` event.
+
+    `thread_id` pins the conversation to the acting user so the checkpointer
+    replays earlier turns; `booking_service` carries the request-scoped service
+    the tools resolve at call time. `svc` is optional so guard/plain-chat tests
+    can drive a tools-less graph without a service.
+    """
+    configurable: dict[str, Any] = {"user_id": str(uid), "thread_id": f"user-{uid}"}
+    if svc is not None:
+        configurable["booking_service"] = svc
+    config: RunnableConfig = {"configurable": configurable}
     graph_input = {"messages": [HumanMessage(content=message)]}
     async for mode, payload in graph.astream(
         graph_input, config=config, stream_mode=GRAPH_STREAM_MODES

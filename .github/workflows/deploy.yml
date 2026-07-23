@@ -1,8 +1,9 @@
 name: deploy
 
 # CD a Railway. Solo se dispara cuando CI terminó correctamente sobre main.
-# Requiere RAILWAY_TOKEN (secret), RAILWAY_SERVICE y PRODUCTION_URL (variables
-# del repositorio). El token debe estar limitado al proyecto Railway correcto.
+# Requiere RAILWAY_TOKEN (secret), RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT,
+# RAILWAY_SERVICE y PRODUCTION_URL (variables del repositorio). El token debe
+# estar limitado al proyecto Railway correcto.
 on:
   workflow_run:
     workflows: ["ci"]
@@ -27,8 +28,10 @@ jobs:
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
           RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
-        run: railway up --service "$RAILWAY_SERVICE" --detach
+        run: railway up --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE" --detach
 
   smoke:
     needs: deploy

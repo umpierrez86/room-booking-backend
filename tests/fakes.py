@@ -74,24 +74,3 @@ class FixedClock:
     def now(self) -> dt.datetime:
         """Return the fixed instant this clock was constructed with."""
         return self._now
-
-
-class SpyMetrics:
-    """`Metrics` spy that counts each recorded event, for assertions in tests."""
-
-    def __init__(self) -> None:
-        self.created = 0
-        self.cancelled = 0
-        self.overlaps = 0
-
-    def booking_created(self) -> None:
-        """Count a created-booking event."""
-        self.created += 1
-
-    def booking_cancelled(self) -> None:
-        """Count a cancelled-booking event."""
-        self.cancelled += 1
-
-    def overlap_rejected(self) -> None:
-        """Count a rejected-overlap event."""
-        self.overlaps += 1

@@ -62,19 +62,3 @@ class RoomCatalog(Protocol):
     def all(self) -> list[Room]:
         """Return every room in the catalog."""
         ...
-
-
-class Metrics(Protocol):
-    """Port for recording business events, whatever the entry point (REST or agent)."""
-
-    def booking_created(self) -> None:
-        """Record that a booking was successfully created."""
-        ...
-
-    def booking_cancelled(self) -> None:
-        """Record that a booking was cancelled."""
-        ...
-
-    def overlap_rejected(self) -> None:
-        """Record that a booking was rejected because of an overlap."""
-        ...

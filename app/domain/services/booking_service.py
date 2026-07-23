@@ -12,7 +12,7 @@ from app.domain import timeutils as tu
 from app.domain.entities import Booking, Room
 from app.domain.errors import BookingNotFound, NotOwner, Overlap, RoomNotFound
 from app.domain.overlap import find_overlap
-from app.domain.ports import BookingRepository, Clock, Metrics, RoomCatalog
+from app.domain.ports import BookingRepository, Clock, RoomCatalog
 
 FreeBlock = tuple[dt.time, dt.time]
 PROBE_ATTENDEES = 0
@@ -35,7 +35,6 @@ class BookingService:
         bookings: BookingRepository,
         rooms: RoomCatalog,
         clock: Clock,
-        metrics: Metrics,
         tz: str,
         open_t: dt.time,
         close_t: dt.time,
@@ -43,7 +42,6 @@ class BookingService:
         self.bookings = bookings
         self.rooms = rooms
         self.clock = clock
-        self.metrics = metrics
         self.tz = tz
         self.open_t = open_t
         self.close_t = close_t
@@ -75,14 +73,12 @@ class BookingService:
         )
         self._reject_if_overlapping(candidate, d)
         stored = self.bookings.add(candidate)
-        self.metrics.booking_created()
         return stored
 
     def cancel(self, owner_id: uuid.UUID, booking_id: uuid.UUID) -> None:
         """Delete a booking owned by `owner_id`, or raise a `DomainError`."""
         booking = self._owned_booking(owner_id, booking_id)
         self.bookings.delete(booking.id)
-        self.metrics.booking_cancelled()
 
     def availability(
         self, d: dt.date, start: dt.time, end: dt.time, attendees: int
@@ -160,7 +156,6 @@ class BookingService:
         day_start, day_end = self._day_bounds_utc(d)
         existing = self.bookings.list_by_room_on_date(candidate.room_code, day_start, day_end)
         if find_overlap(candidate, existing) is not None:
-            self.metrics.overlap_rejected()
             raise Overlap(f"La sala {candidate.room_code} ya está ocupada en ese horario.")
 
     def _free_blocks(self, occupied: list[Booking]) -> list[FreeBlock]:

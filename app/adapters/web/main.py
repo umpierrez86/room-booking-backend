@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.agent import runtime
 from app.adapters.agent.router import router as chat_router
-from app.adapters.web import errors_handler, metrics
+from app.adapters.web import errors_handler
 from app.adapters.web.routers import auth, bookings, health, rooms
 from app.core.config import settings
 from app.core.startup import run_startup
@@ -35,7 +35,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     errors_handler.register(app)
-    metrics.register(app)
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(rooms.router)

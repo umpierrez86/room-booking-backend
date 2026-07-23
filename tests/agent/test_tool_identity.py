@@ -14,7 +14,6 @@ from tests.fakes import (
     FixedClock,
     InMemoryBookingRepository,
     InMemoryRoomCatalog,
-    SpyMetrics,
 )
 
 ROOMS = [Room("A", 4), Room("B", 6), Room("C", 6), Room("D", 8), Room("E", 10)]
@@ -28,7 +27,6 @@ def _service() -> BookingService:
         InMemoryBookingRepository(),
         InMemoryRoomCatalog(ROOMS),
         FixedClock(NOW),
-        SpyMetrics(),
         "America/Montevideo",
         dt.time(8, 0),
         dt.time(20, 0),

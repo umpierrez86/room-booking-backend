@@ -14,7 +14,6 @@ from app.adapters.persistence.room_catalog_sql import SqlRoomCatalog
 from app.adapters.persistence.sql_booking_repo import SqlBookingRepository
 from app.adapters.persistence.sql_user_repo import SqlUserRepository
 from app.adapters.system_clock import SystemClock
-from app.adapters.web.metrics import PrometheusMetrics
 from app.core.config import settings
 from app.core.db import get_session
 from app.core.security import decode_token
@@ -32,7 +31,6 @@ def get_booking_service(session: Session = Depends(get_session)) -> BookingServi
         SqlBookingRepository(session),
         SqlRoomCatalog(session),
         SystemClock(),
-        PrometheusMetrics(),
         settings.app_timezone,
         parse_hhmm(settings.booking_start),
         parse_hhmm(settings.booking_end),

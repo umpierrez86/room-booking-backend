@@ -1,8 +1,11 @@
 """Prometheus instrumentation: request counter, business `Metrics` + `/metrics`."""
 from collections.abc import Awaitable, Callable
+from secrets import compare_digest
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+
+from app.core.config import settings
 
 REQUESTS = Counter("http_requests_total", "Total HTTP requests", ["method", "path"])
 BOOKINGS_CREATED = Counter("bookings_created_total", "Bookings successfully created")
@@ -10,6 +13,7 @@ BOOKINGS_CANCELLED = Counter("bookings_cancelled_total", "Bookings cancelled")
 OVERLAPS_REJECTED = Counter("overlaps_rejected_total", "Bookings rejected due to overlap")
 
 _Handler = Callable[[Request], Awaitable[Response]]
+BEARER_PREFIX = "Bearer "
 
 
 class PrometheusMetrics:
@@ -51,8 +55,26 @@ def register(app: FastAPI) -> None:
         return response
 
     @app.get("/metrics")
-    def metrics() -> Response:
+    def metrics(authorization: str | None = Header(default=None)) -> Response:
+        if not settings.metrics_bearer_token:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Metrics endpoint is not configured",
+            )
+        if authorization is None or not authorization.startswith(BEARER_PREFIX):
+            raise _unauthorized()
+        token = authorization.removeprefix(BEARER_PREFIX)
+        if not compare_digest(token, settings.metrics_bearer_token):
+            raise _unauthorized()
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status.HTTP_401_UNAUTHORIZED,
+        "Invalid metrics credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def _route_template(request: Request) -> str:

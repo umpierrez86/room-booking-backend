@@ -86,20 +86,12 @@ class BookingService:
         starts_at = tu.local_naive_to_utc(d, start, self.tz)
         ends_at = tu.local_naive_to_utc(d, end, self.tz)
         day_start, day_end = self._day_bounds_utc(d)
-
-        def is_free(room_code: str) -> bool:
-            probe = Booking(
-                room_code=room_code,
-                owner_id=uuid.uuid4(),
-                starts_at=starts_at,
-                ends_at=ends_at,
-                title="",
-                attendees=PROBE_ATTENDEES,
-            )
-            existing = self.bookings.list_by_room_on_date(room_code, day_start, day_end)
-            return find_overlap(probe, existing) is None
-
-        return [room for room in self.rooms.all() if room.capacity >= attendees and is_free(room.code)]
+        return [
+            room
+            for room in self.rooms.all()
+            if room.capacity >= attendees
+            and self._is_free(room.code, starts_at, ends_at, day_start, day_end)
+        ]
 
     def schedule(self, room: str, d: dt.date) -> RoomSchedule:
         """Return the room's occupied bookings and free blocks for `d`."""
@@ -137,6 +129,25 @@ class BookingService:
     def _day_bounds_utc(self, d: dt.date) -> tuple[dt.datetime, dt.datetime]:
         day_start = tu.local_naive_to_utc(d, dt.time.min, self.tz)
         return day_start, day_start + dt.timedelta(days=1)
+
+    def _is_free(
+        self,
+        room_code: str,
+        starts_at: dt.datetime,
+        ends_at: dt.datetime,
+        day_start: dt.datetime,
+        day_end: dt.datetime,
+    ) -> bool:
+        probe = Booking(
+            room_code=room_code,
+            owner_id=uuid.uuid4(),
+            starts_at=starts_at,
+            ends_at=ends_at,
+            title="",
+            attendees=PROBE_ATTENDEES,
+        )
+        existing = self.bookings.list_by_room_on_date(room_code, day_start, day_end)
+        return find_overlap(probe, existing) is None
 
     def _reject_if_overlapping(self, candidate: Booking, d: dt.date) -> None:
         day_start, day_end = self._day_bounds_utc(d)

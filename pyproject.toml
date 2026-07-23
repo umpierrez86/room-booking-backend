@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.18.5",
     "bcrypt<4.1",
     "fastapi>=0.139.2",
     "guardrails-ai>=0.10.2",

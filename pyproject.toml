@@ -1,0 +1,53 @@
+[project]
+name = "room-booking-backend"
+version = "0.1.0"
+description = "Room booking backend: FastAPI + LangGraph conversational agent over a hexagonal domain."
+readme = "README.md"
+authors = [
+    { name = "Luciano Umpierrez", email = "luciano.umpierrez@eroninternational.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "bcrypt<4.1",
+    "fastapi>=0.139.2",
+    "guardrails-ai>=0.10.2",
+    "langchain>=1.3.14",
+    "langchain-google-genai>=4.3.1",
+    "langgraph>=1.2.9",
+    "langgraph-checkpoint-postgres>=3.1.0",
+    "passlib[bcrypt]>=1.7.4",
+    "prometheus-client>=0.25.0",
+    "psycopg[binary]>=3.3.4",
+    "pydantic-settings>=2.14.2",
+    "pyjwt>=2.13.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[tool.uv]
+# The application code lives under `app/` and is imported via pytest's
+# `pythonpath = ["."]`; it is never installed as a distributable package, so
+# there is no build step (and no `src/<name>` package for a build backend).
+package = false
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.22",
+    "types-passlib>=1.7.7.20260211",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.mypy]
+mypy_path = "."
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# guardrails-ai ships no type stubs / py.typed marker.
+module = "guardrails.*"
+ignore_missing_imports = true

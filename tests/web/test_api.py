@@ -129,6 +129,17 @@ def test_availability() -> None:
     assert {"B", "D", "E"} <= codes
 
 
+def test_availability_rejects_malformed_time() -> None:
+    client, _ = client_with_fakes()
+    token = login(client)
+    resp = client.get(
+        "/availability",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"date": "2026-07-21", "start": "not-a-time", "end": "11:00", "attendees": 4},
+    )
+    assert resp.status_code == 422
+
+
 def test_room_schedule() -> None:
     client, _ = client_with_fakes()
     token = login(client)

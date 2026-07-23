@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from app.domain.entities import Room
-from app.domain.errors import CapacityExceeded, NotOwner, Overlap, RoomNotFound
+from app.domain.errors import CapacityExceeded, NotOwner, OutOfHours, Overlap, RoomNotFound
 from app.domain.services.booking_service import BookingService
 from tests.fakes import FixedClock, InMemoryBookingRepository, InMemoryRoomCatalog, SpyMetrics
 
@@ -71,6 +71,11 @@ def test_availability_filters_capacity_and_overlap() -> None:
     assert "C" not in free  # ocupada
     assert "A" not in free  # capacidad 4 < 6
     assert {"B", "D", "E"} <= free
+
+
+def test_availability_rejects_slots_outside_operating_hours() -> None:
+    with pytest.raises(OutOfHours):
+        make().availability(D, dt.time(7, 30), dt.time(8, 0), 2)
 
 
 def test_schedule_free_blocks() -> None:

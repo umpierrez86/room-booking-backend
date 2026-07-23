@@ -7,6 +7,11 @@ never an LLM-visible argument — each tool obtains it by calling
 `get_user_id()`, which resolves the identity carried by the JWT (see
 `app.adapters.agent.context.current_user_id`), so the model can never
 impersonate another user.
+
+The `BookingService` is likewise resolved on each call via `get_service()`
+rather than captured in a closure, so the graph these tools belong to can be
+compiled once and reused while each turn still acts through the current
+request's DB session (see `app.adapters.agent.context.current_booking_service`).
 """
 import datetime as dt
 import uuid
@@ -31,6 +36,7 @@ BOOKING_CANCELLED_MESSAGE = "Reserva cancelada."
 BOOKING_CREATED_PREFIX = "Reserva creada"
 
 GetUserId = Callable[[], uuid.UUID]
+GetService = Callable[[], BookingService]
 
 
 class CreateBookingInput(BaseModel):
@@ -55,8 +61,8 @@ class AvailabilityInput(BaseModel):
     )
 
 
-def make_tools(svc: BookingService, get_user_id: GetUserId) -> list[BaseTool]:
-    """Build the agent's five tools, closing over `svc` and `get_user_id`."""
+def make_tools(get_service: GetService, get_user_id: GetUserId) -> list[BaseTool]:
+    """Build the agent's five tools, resolving `service` and `user_id` per call."""
 
     @tool("create_booking", args_schema=CreateBookingInput)
     def create_booking(
@@ -64,7 +70,7 @@ def make_tools(svc: BookingService, get_user_id: GetUserId) -> list[BaseTool]:
     ) -> str:
         """Crea una reserva para la sala/fecha/horario/título/asistentes indicados."""
         try:
-            booking = svc.create(
+            booking = get_service().create(
                 get_user_id(),
                 room,
                 dt.date.fromisoformat(date),
@@ -82,7 +88,7 @@ def make_tools(svc: BookingService, get_user_id: GetUserId) -> list[BaseTool]:
         date: str, start: str, end: str, attendees: int = DEFAULT_ATTENDEES
     ) -> str:
         """Lista las salas libres para el rango horario y cantidad de asistentes."""
-        rooms = svc.availability(
+        rooms = get_service().availability(
             dt.date.fromisoformat(date), tu.parse_hhmm(start), tu.parse_hhmm(end), attendees
         )
         codes = ", ".join(f"{r.code} (cap {r.capacity})" for r in rooms)
@@ -91,6 +97,7 @@ def make_tools(svc: BookingService, get_user_id: GetUserId) -> list[BaseTool]:
     @tool
     def get_room_schedule(room: str, date: str) -> str:
         """Devuelve los bloques ocupados y libres de una sala para una fecha."""
+        svc = get_service()
         try:
             schedule = svc.schedule(room, dt.date.fromisoformat(date))
         except DomainError as exc:
@@ -100,6 +107,7 @@ def make_tools(svc: BookingService, get_user_id: GetUserId) -> list[BaseTool]:
     @tool
     def list_my_bookings() -> str:
         """Lista las reservas del usuario actual, con sus ids, para poder cancelarlas."""
+        svc = get_service()
         bookings = svc.list_by_owner(get_user_id())
         lines = [_render_own_booking(b, svc.tz) for b in bookings]
         return "\n".join(lines) or NO_OWN_BOOKINGS_MESSAGE
@@ -108,7 +116,7 @@ def make_tools(svc: BookingService, get_user_id: GetUserId) -> list[BaseTool]:
     def cancel_booking(booking_id: str) -> str:
         """Cancela una reserva propia dado su id."""
         try:
-            svc.cancel(get_user_id(), uuid.UUID(booking_id))
+            get_service().cancel(get_user_id(), uuid.UUID(booking_id))
         except DomainError as exc:
             return exc.message
         return BOOKING_CANCELLED_MESSAGE

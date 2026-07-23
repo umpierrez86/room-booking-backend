@@ -36,7 +36,7 @@ def _service() -> BookingService:
 
 
 def test_no_tool_exposes_user_id() -> None:
-    tools = make_tools(_service(), uuid.uuid4)
+    tools = make_tools(_service, uuid.uuid4)
     assert tools, "expected the agent to expose at least one tool"
     for tool in tools:
         assert FORBIDDEN_FIELD not in tool.args, f"{tool.name} exposes {FORBIDDEN_FIELD} in args"

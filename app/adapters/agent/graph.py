@@ -4,7 +4,7 @@ The graph never reimplements booking rules: `tools` wrap `BookingService`,
 and the guard rejects off-topic/injection input before the LLM ever runs.
 """
 from collections.abc import Callable
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
@@ -65,7 +65,7 @@ def build_graph(
         async for chunk in llm_with_tools.astream(messages):
             if chunk.text:
                 writer({"type": "token", "text": chunk.text})
-            response = chunk if response is None else response + chunk
+            response = cast(BaseMessage, chunk if response is None else response + chunk)
 
         if response is None:
             raise RuntimeError("The language model returned no response")

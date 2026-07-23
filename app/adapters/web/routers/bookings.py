@@ -39,8 +39,8 @@ def create(
         owner_id,
         body.room,
         body.date,
-        tu.parse_hhmm(body.start),
-        tu.parse_hhmm(body.end),
+        body.start,
+        body.end,
         body.title,
         body.attendees,
     )

@@ -88,8 +88,10 @@ class BookingService:
         self, d: dt.date, start: dt.time, end: dt.time, attendees: int
     ) -> list[Room]:
         """Return rooms with enough capacity and no overlap for the given slot."""
+        rules.validate_slot(d, start, end, self.tz, self.open_t, self.close_t)
         starts_at = tu.local_naive_to_utc(d, start, self.tz)
         ends_at = tu.local_naive_to_utc(d, end, self.tz)
+        rules.validate_not_past(starts_at, self.clock)
         day_start, day_end = self._day_bounds_utc(d)
         return [
             room

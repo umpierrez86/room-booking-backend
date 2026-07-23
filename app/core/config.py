@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     google_api_key: str = ""
     llm_model: str = "google_genai:gemini-3.1-flash-lite"
     cors_origins: str = "*"
+    metrics_bearer_token: str = ""
     seed_demo_users: bool = False
     testing: bool = False
 

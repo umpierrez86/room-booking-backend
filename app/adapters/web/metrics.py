@@ -1,12 +1,44 @@
-"""Prometheus instrumentation: request counter + `/metrics` endpoint."""
+"""Prometheus instrumentation: request counter, business `Metrics` + `/metrics`."""
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 
 REQUESTS = Counter("http_requests_total", "Total HTTP requests", ["method", "path"])
+BOOKINGS_CREATED = Counter("bookings_created_total", "Bookings successfully created")
+BOOKINGS_CANCELLED = Counter("bookings_cancelled_total", "Bookings cancelled")
+OVERLAPS_REJECTED = Counter("overlaps_rejected_total", "Bookings rejected due to overlap")
 
 _Handler = Callable[[Request], Awaitable[Response]]
+
+
+class PrometheusMetrics:
+    """`Metrics` adapter backed by process-wide Prometheus counters."""
+
+    def booking_created(self) -> None:
+        """Increment the created-bookings counter."""
+        BOOKINGS_CREATED.inc()
+
+    def booking_cancelled(self) -> None:
+        """Increment the cancelled-bookings counter."""
+        BOOKINGS_CANCELLED.inc()
+
+    def overlap_rejected(self) -> None:
+        """Increment the rejected-overlaps counter."""
+        OVERLAPS_REJECTED.inc()
+
+
+class NoOpMetrics:
+    """`Metrics` implementation that records nothing; the default for tests/fakes."""
+
+    def booking_created(self) -> None:
+        """Do nothing."""
+
+    def booking_cancelled(self) -> None:
+        """Do nothing."""
+
+    def overlap_rejected(self) -> None:
+        """Do nothing."""
 
 
 def register(app: FastAPI) -> None:

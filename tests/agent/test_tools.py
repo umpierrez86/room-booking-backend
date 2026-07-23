@@ -54,4 +54,4 @@ def test_availability_tool_returns_domain_error_message() -> None:
             {"date": "2026-07-17", "start": "10:00", "end": "11:00", "attendees": 4}
         )
 
-    assert "pasado" in out.lower()
+    assert out == "El horario ya pasó."

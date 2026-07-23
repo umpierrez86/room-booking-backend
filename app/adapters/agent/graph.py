@@ -9,13 +9,15 @@ from typing import Annotated, TypedDict
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.tools import BaseTool
+from langgraph.config import get_stream_writer
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from app.adapters.agent.prompt import SYSTEM_PROMPT
+from app.adapters.agent.prompt import make_system_prompt
+from app.core.config import settings
 
 GUARD_NODE = "guard"
 AGENT_NODE = "agent"
@@ -52,9 +54,22 @@ def build_graph(
     def route_after_guard(state: AgentState) -> str:
         return END if isinstance(state["messages"][-1], AIMessage) else AGENT_NODE
 
-    def agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
-        messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
-        return {"messages": [llm_with_tools.invoke(messages)]}
+    async def agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
+        """Keep one complete graph message while forwarding text immediately."""
+        messages: list[BaseMessage] = [
+            SystemMessage(content=make_system_prompt(settings.app_timezone)),
+            *state["messages"],
+        ]
+        writer = get_stream_writer()
+        response: BaseMessage | None = None
+        async for chunk in llm_with_tools.astream(messages):
+            if chunk.text:
+                writer({"type": "token", "text": chunk.text})
+            response = chunk if response is None else response + chunk
+
+        if response is None:
+            raise RuntimeError("The language model returned no response")
+        return {"messages": [response]}
 
     def route_after_agent(state: AgentState) -> str:
         tool_calls = getattr(state["messages"][-1], "tool_calls", None)

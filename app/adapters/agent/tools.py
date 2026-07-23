@@ -88,9 +88,12 @@ def make_tools(get_service: GetService, get_user_id: GetUserId) -> list[BaseTool
         date: str, start: str, end: str, attendees: int = DEFAULT_ATTENDEES
     ) -> str:
         """Lista las salas libres para el rango horario y cantidad de asistentes."""
-        rooms = get_service().availability(
-            dt.date.fromisoformat(date), tu.parse_hhmm(start), tu.parse_hhmm(end), attendees
-        )
+        try:
+            rooms = get_service().availability(
+                dt.date.fromisoformat(date), tu.parse_hhmm(start), tu.parse_hhmm(end), attendees
+            )
+        except DomainError as exc:
+            return exc.message
         codes = ", ".join(f"{r.code} (cap {r.capacity})" for r in rooms)
         return f"Salas libres: {codes or NO_FREE_ROOMS_LABEL}"
 

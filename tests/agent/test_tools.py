@@ -41,3 +41,14 @@ def test_create_tool_returns_domain_error_message() -> None:
         {"room": "A", "date": "2026-07-21", "start": "10:00", "end": "11:00", "title": "x", "attendees": 5}
     )
     assert "capacidad" in out.lower()
+
+
+def test_availability_tool_returns_domain_error_message() -> None:
+    svc = make_service()
+    tools = {t.name: t for t in make_tools(lambda: svc, lambda: uuid.uuid4())}
+
+    out = tools["list_available_rooms"].invoke(
+        {"date": "2026-07-17", "start": "10:00", "end": "11:00", "attendees": 4}
+    )
+
+    assert "pasado" in out.lower()

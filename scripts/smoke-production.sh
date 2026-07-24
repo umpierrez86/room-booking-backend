@@ -22,7 +22,7 @@ retry_get() {
 
 echo "Checking API health"
 health_response="$(retry_get "${base_url}/health")"
-HEALTH_RESPONSE="${health_response}" python - <<'PY'
+HEALTH_RESPONSE="${health_response}" python3 - <<'PY'
 import json
 import os
 
@@ -48,7 +48,7 @@ fi
 
 echo "Authenticating smoke-test user"
 login_payload="$(
-  SMOKE_USERNAME="${SMOKE_USERNAME}" SMOKE_PASSWORD="${SMOKE_PASSWORD}" python - <<'PY'
+  SMOKE_USERNAME="${SMOKE_USERNAME}" SMOKE_PASSWORD="${SMOKE_PASSWORD}" python3 - <<'PY'
 import json
 import os
 
@@ -69,7 +69,7 @@ login_response="$(
     "${base_url}/auth/login"
 )"
 access_token="$(
-  LOGIN_RESPONSE="${login_response}" python - <<'PY'
+  LOGIN_RESPONSE="${login_response}" python3 - <<'PY'
 import json
 import os
 
@@ -86,7 +86,7 @@ rooms_response="$(
     --header "Authorization: Bearer ${access_token}" \
     "${base_url}/rooms"
 )"
-ROOMS_RESPONSE="${rooms_response}" python - <<'PY'
+ROOMS_RESPONSE="${rooms_response}" python3 - <<'PY'
 import json
 import os
 
@@ -105,7 +105,7 @@ schedule_response="$(
     --header "Authorization: Bearer ${access_token}" \
     "${base_url}/schedule?date=${smoke_date}"
 )"
-SCHEDULE_RESPONSE="${schedule_response}" SMOKE_DATE="${smoke_date}" python - <<'PY'
+SCHEDULE_RESPONSE="${schedule_response}" SMOKE_DATE="${smoke_date}" python3 - <<'PY'
 import json
 import os
 

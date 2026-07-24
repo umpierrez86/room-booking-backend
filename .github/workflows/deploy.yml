@@ -2,8 +2,9 @@ name: deploy
 
 # CD a Railway. Solo se dispara cuando CI terminó correctamente sobre main.
 # Requiere RAILWAY_TOKEN (secret), RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT,
-# RAILWAY_SERVICE y PRODUCTION_URL (variables del repositorio). El token debe
-# estar limitado al proyecto Railway correcto.
+# RAILWAY_SERVICE y PRODUCTION_URL (variables del repositorio), además de
+# SMOKE_USERNAME y SMOKE_PASSWORD (secrets). El token debe estar limitado al
+# proyecto Railway correcto.
 on:
   workflow_run:
     workflows: ["ci"]
@@ -19,6 +20,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,23 +33,19 @@ jobs:
           RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
           RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
           RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
-        run: railway up --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE" --detach
+        run: railway up --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE"
 
   smoke:
     needs: deploy
-    # The first deployment creates the service that will later receive its
-    # public domain, so there is no URL to probe until that bootstrap is done.
-    if: ${{ vars.PRODUCTION_URL != '' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Health check
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Verify production API
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-        run: |
-          for i in $(seq 1 12); do
-            if curl -fsS "$PRODUCTION_URL/health" | grep -q '"status":"ok"'; then
-              echo "production healthy"; exit 0
-            fi
-            echo "esperando a production... ($i)"; sleep 5
-          done
-          echo "production did not respond healthy"; exit 1
+          SMOKE_USERNAME: ${{ secrets.SMOKE_USERNAME }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: bash scripts/smoke-production.sh

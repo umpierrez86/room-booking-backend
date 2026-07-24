@@ -1,0 +1,27 @@
+name: agent-evals
+
+on:
+  workflow_dispatch:
+
+jobs:
+  full-evaluation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - name: Validate agent evaluation configuration
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          test -n "$GOOGLE_API_KEY"
+          test -n "$LANGSMITH_API_KEY"
+      - name: Run complete agent evaluation
+        env:
+          AGENT_EVAL_SUITE: full
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_TRACING: "false"
+        run: uv run python -m evals.run_evals

@@ -9,7 +9,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -36,7 +36,7 @@ from evals.evaluators import (
     selected_expected_tool,
     tool_match,
 )
-from evals.sync_dataset import DATASET_NAME, sync_dataset
+from evals.sync_dataset import sync_dataset
 from tests.fakes import InMemoryBookingRepository, InMemoryRoomCatalog
 
 EXPERIMENT_PREFIX = "agent-regression"
@@ -44,6 +44,21 @@ ROOM_CAPACITIES = {"A": 4, "B": 6, "C": 6, "D": 8, "E": 10}
 EVAL_THREAD_PREFIX = "eval"
 MAX_CONCURRENCY = 2
 REQUESTS_PER_SECOND = 0.15
+SMOKE_REQUESTS_PER_SECOND = 0.20
+
+EvalSuite = Literal["smoke", "full"]
+SMOKE_CASE_IDS = frozenset(
+    {
+        "schedule-room-a-tomorrow",
+        "availability-six-tomorrow-morning",
+        "create-room-c-sprint-review",
+        "list-own-bookings",
+        "cancel-explicit-confirmed-id",
+        "cancel-without-id",
+        "missing-availability-range",
+        "prompt-injection-spanish",
+    }
+)
 
 MIN_TOOL_ACCURACY = 0.90
 MIN_ARGUMENT_ACCURACY = 0.85
@@ -282,32 +297,73 @@ def _run_outputs(run: Any) -> dict[str, Any]:
     return dict(run.outputs or {})
 
 
+def _eval_suite() -> EvalSuite:
+    suite = os.getenv("AGENT_EVAL_SUITE", "full")
+    if suite == "smoke":
+        return "smoke"
+    if suite == "full":
+        return "full"
+    raise ValueError("AGENT_EVAL_SUITE must be 'smoke' or 'full'")
+
+
+def _selected_examples(
+    examples: Iterable[Any], suite: EvalSuite
+) -> list[Any]:
+    example_list = list(examples)
+    if suite == "full":
+        return example_list
+    return [
+        example
+        for example in example_list
+        if (example.metadata or {}).get("case_id") in SMOKE_CASE_IDS
+    ]
+
+
 def run_evals() -> None:
+    suite = _eval_suite()
     client = Client()
-    sync_dataset(client, CASES)
+    dataset = sync_dataset(client, CASES)
+    examples = _selected_examples(
+        client.list_examples(dataset_id=dataset.id),
+        suite,
+    )
+    expected_count = len(SMOKE_CASE_IDS) if suite == "smoke" else len(CASES)
+    if len(examples) != expected_count:
+        raise RuntimeError(
+            f"Expected {expected_count} {suite} examples, found {len(examples)}"
+        )
     rate_limiter = InMemoryRateLimiter(
-        requests_per_second=REQUESTS_PER_SECOND,
+        requests_per_second=(
+            SMOKE_REQUESTS_PER_SECOND
+            if suite == "smoke"
+            else REQUESTS_PER_SECOND
+        ),
         check_every_n_seconds=0.1,
         max_bucket_size=1,
     )
     target_model = init_chat_model(settings.llm_model, rate_limiter=rate_limiter)
-    judge_model = init_chat_model(
-        os.getenv("EVAL_JUDGE_MODEL", settings.llm_model),
-        rate_limiter=rate_limiter,
-    )
+    evaluators: list[Evaluator] = [
+        correct_tool_selection,
+        correct_tool_arguments,
+        safe_behavior,
+    ]
+    if suite == "full":
+        judge_model = init_chat_model(
+            os.getenv("EVAL_JUDGE_MODEL", settings.llm_model),
+            rate_limiter=rate_limiter,
+        )
+        evaluators.append(_make_response_quality(judge_model))
     results = evaluate(
         _make_target(target_model),
-        data=DATASET_NAME,
-        evaluators=[
-            correct_tool_selection,
-            correct_tool_arguments,
-            safe_behavior,
-            _make_response_quality(judge_model),
-        ],
+        data=examples,
+        evaluators=evaluators,
         client=client,
-        experiment_prefix=EXPERIMENT_PREFIX,
+        experiment_prefix=f"{EXPERIMENT_PREFIX}-{suite}",
         max_concurrency=MAX_CONCURRENCY,
-        metadata={"git_sha": os.getenv("GITHUB_SHA", "local")},
+        metadata={
+            "git_sha": os.getenv("GITHUB_SHA", "local"),
+            "suite": suite,
+        },
     )
     rows = list(results)
     summary = enforce_quality_gates(rows)

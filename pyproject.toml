@@ -3,9 +3,6 @@ name = "room-booking-backend"
 version = "0.1.0"
 description = "Room booking backend: FastAPI + LangGraph conversational agent over a hexagonal domain."
 readme = "README.md"
-authors = [
-    { name = "Luciano Umpierrez", email = "luciano.umpierrez@eroninternational.com" }
-]
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.5",

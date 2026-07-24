@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">Dependencias principales de la arquitectura hexagonal</title>
+  <desc id="description">Diagrama UML de paquetes y módulos que muestra cómo los adaptadores utilizan los servicios del dominio y cómo persistencia implementa los puertos definidos por el dominio.</desc>
+  <defs>
+    <marker id="dependency-end" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M1,1 L10,6 L1,11" fill="none" stroke="#171717" stroke-width="1.7"/>
+    </marker>
+    <marker id="realization-end" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M1,1 L12,7 L1,13 Z" fill="#ffffff" stroke="#171717" stroke-width="1.7"/>
+    </marker>
+    <style>
+      .background { fill: #ffffff; }
+      .package { fill: #ffffff; stroke: #171717; stroke-width: 2.5; }
+      .package-tab { fill: #ffffff; stroke: #171717; stroke-width: 2.5; }
+      .element { fill: #f7f7f7; stroke: #4a4a4a; stroke-width: 2; rx: 4; }
+      .dependency { fill: none; stroke: #171717; stroke-width: 2.2; stroke-dasharray: 10 8; marker-end: url(#dependency-end); }
+      .realization { fill: none; stroke: #171717; stroke-width: 2.2; stroke-dasharray: 10 8; marker-end: url(#realization-end); }
+      .app-name { font: 700 30px Arial, sans-serif; fill: #111111; }
+      .package-name { font: 700 27px Arial, sans-serif; fill: #111111; }
+      .stereotype { font: 400 17px Arial, sans-serif; fill: #4b4b4b; text-anchor: middle; }
+      .element-name { font: 700 24px Arial, sans-serif; fill: #111111; text-anchor: middle; }
+      .element-detail { font: 400 17px Arial, sans-serif; fill: #4b4b4b; text-anchor: middle; }
+      .relation { font: 500 17px Arial, sans-serif; fill: #333333; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect class="background" width="1600" height="900"/>
+
+  <path class="package" d="M55 90 H1545 V850 H55 Z"/>
+  <path class="package-tab" d="M55 90 V50 H195 L225 90 Z"/>
+  <text class="app-name" x="92" y="79">app</text>
+
+  <path class="package" d="M105 180 H625 V790 H105 Z"/>
+  <path class="package-tab" d="M105 180 V135 H275 L305 180 Z"/>
+  <text class="package-name" x="135" y="168">adapters</text>
+
+  <path class="package" d="M700 180 H1490 V790 H700 Z"/>
+  <path class="package-tab" d="M700 180 V135 H855 L885 180 Z"/>
+  <text class="package-name" x="730" y="168">domain</text>
+
+  <rect class="element" x="165" y="235" width="300" height="115"/>
+  <text class="stereotype" x="315" y="267">«package»</text>
+  <text class="element-name" x="315" y="304">web</text>
+  <text class="element-detail" x="315" y="331">REST y SSE</text>
+
+  <rect class="element" x="165" y="420" width="300" height="115"/>
+  <text class="stereotype" x="315" y="452">«package»</text>
+  <text class="element-name" x="315" y="489">agent</text>
+  <text class="element-detail" x="315" y="516">LangGraph y tools</text>
+
+  <rect class="element" x="165" y="605" width="300" height="115"/>
+  <text class="stereotype" x="315" y="637">«package»</text>
+  <text class="element-name" x="315" y="674">persistence</text>
+  <text class="element-detail" x="315" y="701">SQLAlchemy</text>
+
+  <rect class="element" x="760" y="355" width="270" height="125"/>
+  <text class="stereotype" x="895" y="389">«package»</text>
+  <text class="element-name" x="895" y="427">services</text>
+  <text class="element-detail" x="895" y="455">casos de uso</text>
+
+  <rect class="element" x="1145" y="235" width="270" height="110"/>
+  <text class="stereotype" x="1280" y="267">«module»</text>
+  <text class="element-name" x="1280" y="304">entities.py</text>
+  <text class="element-detail" x="1280" y="330">modelo del dominio</text>
+
+  <rect class="element" x="1145" y="415" width="270" height="110"/>
+  <text class="stereotype" x="1280" y="447">«module»</text>
+  <text class="element-name" x="1280" y="484">rules.py</text>
+  <text class="element-detail" x="1280" y="510">reglas de reserva</text>
+
+  <rect class="element" x="1145" y="595" width="270" height="110"/>
+  <text class="stereotype" x="1280" y="627">«module»</text>
+  <text class="element-name" x="1280" y="664">ports.py</text>
+  <text class="element-detail" x="1280" y="690">contratos de salida</text>
+
+  <path class="dependency" d="M465 292 H620 Q650 292 675 315 L760 390"/>
+  <text class="relation" x="620" y="276">usa</text>
+
+  <path class="dependency" d="M465 477 H625 Q660 477 690 458 L760 430"/>
+  <text class="relation" x="620" y="462">usa</text>
+
+  <path class="dependency" d="M1030 390 Q1080 350 1145 305"/>
+  <text class="relation" x="1084" y="329">usa</text>
+
+  <path class="dependency" d="M1030 420 H1145"/>
+  <text class="relation" x="1087" y="405">valida con</text>
+
+  <path class="dependency" d="M1030 455 Q1080 520 1145 620"/>
+  <text class="relation" x="1092" y="548">depende de</text>
+
+  <path class="realization" d="M465 662 H1060 Q1100 662 1145 655"/>
+  <text class="relation" x="820" y="647">implementa</text>
+</svg>

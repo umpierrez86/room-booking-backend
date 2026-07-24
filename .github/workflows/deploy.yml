@@ -2,8 +2,9 @@ name: deploy
 
 # CD a Railway. Solo se dispara cuando CI terminó correctamente sobre main.
 # Requiere RAILWAY_TOKEN (secret), RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT,
-# RAILWAY_SERVICE y PRODUCTION_URL (variables del repositorio). El token debe
-# estar limitado al proyecto Railway correcto.
+# RAILWAY_SERVICE y PRODUCTION_URL (variables del repositorio), además de
+# SMOKE_USERNAME y SMOKE_PASSWORD (secrets). El token debe estar limitado al
+# proyecto Railway correcto.
 on:
   workflow_run:
     workflows: ["ci"]
@@ -19,35 +20,75 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 15
+    outputs:
+      previous_deployment_id: ${{ steps.previous_deployment.outputs.id }}
     steps:
+      - name: Validate deployment configuration
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          SMOKE_USERNAME: ${{ secrets.SMOKE_USERNAME }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          test -n "$PRODUCTION_URL"
+          test -n "$SMOKE_USERNAME"
+          test -n "$SMOKE_PASSWORD"
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - name: Install Railway CLI
         run: npm i -g @railway/cli
+      - name: Record current production deployment
+        id: previous_deployment
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+        run: echo "id=$(bash scripts/railway-deployment.sh current)" >> "$GITHUB_OUTPUT"
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
           RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
           RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
-        run: railway up --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE" --detach
+        run: railway up --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE"
 
   smoke:
     needs: deploy
-    # The first deployment creates the service that will later receive its
-    # public domain, so there is no URL to probe until that bootstrap is done.
-    if: ${{ vars.PRODUCTION_URL != '' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
-      - name: Health check
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Verify production API
+        id: smoke
+        continue-on-error: true
         env:
           PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          SMOKE_USERNAME: ${{ secrets.SMOKE_USERNAME }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: bash scripts/smoke-production.sh
+      - name: Install Railway CLI for rollback
+        if: ${{ steps.smoke.outcome == 'failure' }}
+        run: npm i -g @railway/cli
+      - name: Roll back production
+        if: ${{ steps.smoke.outcome == 'failure' }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+          PREVIOUS_DEPLOYMENT_ID: ${{ needs.deploy.outputs.previous_deployment_id }}
+        run: bash scripts/railway-deployment.sh rollback "$PREVIOUS_DEPLOYMENT_ID"
+      - name: Verify restored production API
+        if: ${{ steps.smoke.outcome == 'failure' }}
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          SMOKE_USERNAME: ${{ secrets.SMOKE_USERNAME }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: bash scripts/smoke-production.sh
+      - name: Report failed production verification
+        if: ${{ always() && steps.smoke.outcome == 'failure' }}
         run: |
-          for i in $(seq 1 12); do
-            if curl -fsS "$PRODUCTION_URL/health" | grep -q '"status":"ok"'; then
-              echo "production healthy"; exit 0
-            fi
-            echo "esperando a production... ($i)"; sleep 5
-          done
-          echo "production did not respond healthy"; exit 1
+          echo "Production smoke failed; rollback was attempted."
+          exit 1

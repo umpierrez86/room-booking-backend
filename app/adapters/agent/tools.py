@@ -68,7 +68,7 @@ def make_tools(get_service: GetService, get_user_id: GetUserId) -> list[BaseTool
     def create_booking(
         room: str, date: str, start: str, end: str, title: str, attendees: int
     ) -> str:
-        """Crea una reserva para la sala/fecha/horario/título/asistentes indicados."""
+        """Crea una reserva solo si el usuario indicó explícitamente todos los datos."""
         try:
             booking = get_service().create(
                 get_user_id(),
@@ -87,7 +87,7 @@ def make_tools(get_service: GetService, get_user_id: GetUserId) -> list[BaseTool
     def list_available_rooms(
         date: str, start: str, end: str, attendees: int = DEFAULT_ATTENDEES
     ) -> str:
-        """Lista las salas libres para el rango horario y cantidad de asistentes."""
+        """Lista salas libres solo si el usuario indicó fecha, rango y asistentes."""
         try:
             rooms = get_service().availability(
                 dt.date.fromisoformat(date), tu.parse_hhmm(start), tu.parse_hhmm(end), attendees

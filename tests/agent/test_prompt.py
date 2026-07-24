@@ -17,3 +17,9 @@ def test_system_prompt_includes_current_local_date(monkeypatch) -> None:
 
 def test_system_prompt_forbids_technical_tool_names() -> None:
     assert "Nunca nombres herramientas" in prompt.SYSTEM_PROMPT
+
+
+def test_system_prompt_forbids_inventing_missing_booking_fields() -> None:
+    assert "Nunca completes ni supongas" in prompt.SYSTEM_PROMPT
+    assert "sala, fecha, hora de inicio, hora de fin, título" in prompt.SYSTEM_PROMPT
+    assert "sin llamar ninguna herramienta" in prompt.SYSTEM_PROMPT

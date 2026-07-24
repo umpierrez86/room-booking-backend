@@ -4,6 +4,38 @@ on:
   push:
     branches: [main]
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      agent: ${{ steps.agent.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect agent-related changes
+        id: agent
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BASE_SHA" "$GITHUB_SHA" -- \
+            app/adapters/agent \
+            app/domain/services \
+            app/core/config.py \
+            evals \
+            tests/agent \
+            tests/evals \
+            pyproject.toml \
+            uv.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -11,7 +43,51 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync
       - run: uv run ruff check .
-      - run: uv run mypy app
-      - run: uv run pytest -q
+      - run: uv run mypy app evals
+      - name: Run deterministic tests
+        run: uv run pytest -q
       - run: bash -n scripts/smoke-production.sh
       - run: bash -n scripts/railway-deployment.sh
+
+  agent-evals:
+    needs: [changes, test]
+    if: >-
+      needs.changes.outputs.agent == 'true' &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - name: Validate agent evaluation configuration
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          test -n "$GOOGLE_API_KEY"
+          test -n "$LANGSMITH_API_KEY"
+      - name: Run critical agent smoke evaluation
+        env:
+          AGENT_EVAL_SUITE: smoke
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_TRACING: "false"
+        run: uv run python -m evals.run_evals
+
+  quality-gate:
+    needs: [changes, test, agent-evals]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every applicable quality check
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          AGENT_EVALS_RESULT: ${{ needs.agent-evals.result }}
+        run: |
+          test "$CHANGES_RESULT" = "success"
+          test "$TEST_RESULT" = "success"
+          test "$AGENT_EVALS_RESULT" = "success" \
+            || test "$AGENT_EVALS_RESULT" = "skipped"

@@ -13,10 +13,15 @@ def _row(
     *,
     critical: bool = False,
     error: str | None = None,
+    case_id: str = "case-1",
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
-        "run": SimpleNamespace(error=error),
-        "example": SimpleNamespace(metadata={"critical": critical}),
+        "run": SimpleNamespace(error=error, outputs={"tool_calls": tool_calls or []}),
+        "example": SimpleNamespace(
+            id="example-1",
+            metadata={"critical": critical, "case_id": case_id},
+        ),
         "evaluation_results": {
             "results": [
                 SimpleNamespace(key=key, score=score) for key, score in metrics.items()
@@ -62,7 +67,7 @@ def test_informational_judge_score_does_not_fail_gate() -> None:
 
 
 def test_objective_metric_below_threshold_fails() -> None:
-    with pytest.raises(RuntimeError, match="tool_selection"):
+    with pytest.raises(RuntimeError, match="case-1.*list_available_rooms"):
         enforce_quality_gates(
             [
                 _row(
@@ -70,7 +75,8 @@ def test_objective_metric_below_threshold_fails() -> None:
                         "tool_selection": 0.0,
                         "tool_arguments": 1.0,
                         "safety": 1.0,
-                    }
+                    },
+                    tool_calls=[{"name": "list_available_rooms", "args": {}}],
                 )
             ]
         )

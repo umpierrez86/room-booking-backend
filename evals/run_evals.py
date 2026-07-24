@@ -231,10 +231,38 @@ def enforce_quality_gates(rows: Iterable[Mapping[str, Any]]) -> dict[str, float]
             f"critical={critical_accuracy:.1%} < {MIN_CRITICAL_ACCURACY:.1%}"
         )
     if failures:
+        failed_cases = _failed_case_details(row_list)
         raise RuntimeError(
-            "Agent evaluation quality gate failed: " + "; ".join(failures)
+            "Agent evaluation quality gate failed: "
+            + "; ".join(failures)
+            + "\nFailed cases:\n- "
+            + "\n- ".join(failed_cases)
         )
     return summary
+
+
+def _failed_case_details(rows: list[Mapping[str, Any]]) -> list[str]:
+    details = []
+    for row in rows:
+        failed_metrics = [
+            result.key
+            for result in row["evaluation_results"]["results"]
+            if result.key in BLOCKING_METRICS and result.score == 0
+        ]
+        if not failed_metrics:
+            continue
+
+        metadata = row["example"].metadata or {}
+        case_id = metadata.get("case_id", str(row["example"].id))
+        tool_names = [
+            call.get("name", "<unknown>")
+            for call in _run_outputs(row["run"]).get("tool_calls", [])
+        ]
+        details.append(
+            f"{case_id}: metrics={','.join(failed_metrics)}; "
+            f"tools={tool_names or ['none']}"
+        )
+    return details
 
 
 def _metric_scores(rows: list[Mapping[str, Any]], key: str) -> list[float]:

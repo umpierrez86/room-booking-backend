@@ -4,17 +4,16 @@ The graph never reimplements booking rules: `tools` wrap `BookingService`,
 and the guard rejects off-topic/injection input before the LLM ever runs.
 """
 from collections.abc import Callable
-from typing import Annotated, TypedDict, cast
+from typing import cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.config import get_stream_writer
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import ToolNode
+from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.adapters.agent.prompt import make_system_prompt
 from app.core.config import settings
@@ -24,12 +23,6 @@ AGENT_NODE = "agent"
 TOOLS_NODE = "tools"
 
 GuardFn = Callable[[str], str | None]
-
-
-class AgentState(TypedDict):
-    """Conversation state threaded through the graph."""
-
-    messages: Annotated[list[BaseMessage], add_messages]
 
 
 def build_graph(
@@ -45,16 +38,16 @@ def build_graph(
     """
     llm_with_tools = llm.bind_tools(tools) if tools else llm
 
-    def guard_node(state: AgentState) -> dict[str, list[BaseMessage]]:
+    def guard_node(state: MessagesState) -> dict[str, list[BaseMessage]]:
         rejection = guard(state["messages"][-1].text)
         if rejection is None:
             return {}
         return {"messages": [AIMessage(content=rejection)]}
 
-    def route_after_guard(state: AgentState) -> str:
+    def route_after_guard(state: MessagesState) -> str:
         return END if isinstance(state["messages"][-1], AIMessage) else AGENT_NODE
 
-    async def agent_node(state: AgentState) -> dict[str, list[BaseMessage]]:
+    async def agent_node(state: MessagesState) -> dict[str, list[BaseMessage]]:
         """Keep one complete graph message while forwarding text immediately."""
         messages: list[BaseMessage] = [
             SystemMessage(content=make_system_prompt(settings.app_timezone)),
@@ -71,11 +64,7 @@ def build_graph(
             raise RuntimeError("The language model returned no response")
         return {"messages": [response]}
 
-    def route_after_agent(state: AgentState) -> str:
-        tool_calls = getattr(state["messages"][-1], "tool_calls", None)
-        return TOOLS_NODE if tool_calls else END
-
-    graph = StateGraph(AgentState)
+    graph = StateGraph(MessagesState)
     graph.add_node(GUARD_NODE, guard_node)
     graph.add_node(AGENT_NODE, agent_node)
     graph.add_edge(START, GUARD_NODE)
@@ -83,7 +72,7 @@ def build_graph(
 
     if tools:
         graph.add_node(TOOLS_NODE, ToolNode(tools))
-        graph.add_conditional_edges(AGENT_NODE, route_after_agent)
+        graph.add_conditional_edges(AGENT_NODE, tools_condition)
         graph.add_edge(TOOLS_NODE, AGENT_NODE)
     else:
         graph.add_edge(AGENT_NODE, END)

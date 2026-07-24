@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 780" role="img" aria-labelledby="title description">
+  <title id="title">Componentes internos del Backend API</title>
+  <desc id="description">Diagrama UML con un flujo ordenado desde API hasta Repositorios y puertos ubicados sobre el borde del Backend API.</desc>
+  <defs>
+    <marker id="arrow-end" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#171717"/>
+    </marker>
+    <symbol id="component-mark" viewBox="0 0 30 24">
+      <rect x="8" y="2" width="20" height="20" fill="none" stroke="#171717" stroke-width="1.5"/>
+      <rect x="2" y="6" width="9" height="4" fill="#f7f7f7" stroke="#171717" stroke-width="1.5"/>
+      <rect x="2" y="14" width="9" height="4" fill="#f7f7f7" stroke="#171717" stroke-width="1.5"/>
+    </symbol>
+    <style>
+      .boundary { fill: #ffffff; stroke: #171717; stroke-width: 2.5; }
+      .component { fill: #f7f7f7; stroke: #4a4a4a; stroke-width: 2; rx: 4; }
+      .port { fill: #ffffff; stroke: #171717; stroke-width: 3; }
+      .connector { fill: none; stroke: #171717; stroke-width: 2.5; }
+      .flow { marker-end: url(#arrow-end); }
+      .title { font: 700 30px Arial, sans-serif; fill: #111111; }
+      .name { font: 600 24px Arial, sans-serif; fill: #111111; text-anchor: middle; dominant-baseline: middle; }
+      .port-name { font: 500 22px Arial, sans-serif; fill: #111111; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="780" fill="#ffffff"/>
+  <g transform="translate(100 0)">
+  <rect class="boundary" x="110" y="80" width="1280" height="610" rx="5"/>
+  <text class="title" x="750" y="122" text-anchor="middle">Backend API</text>
+
+  <rect class="port" x="102" y="222" width="16" height="16"/>
+  <text class="port-name" x="88" y="216" text-anchor="end">HTTP y SSE</text>
+
+  <rect class="port" x="442" y="72" width="16" height="16"/>
+  <text class="port-name" x="450" y="48" text-anchor="middle">LLM</text>
+
+  <rect class="port" x="1382" y="222" width="16" height="16"/>
+  <text class="port-name" x="1412" y="216">Datos</text>
+
+  <rect class="port" x="442" y="682" width="16" height="16"/>
+  <text class="port-name" x="450" y="732" text-anchor="middle">Checkpoints</text>
+
+  <rect class="component" x="160" y="185" width="160" height="90"/>
+  <use href="#component-mark" x="283" y="195" width="28" height="22"/>
+  <text class="name" x="240" y="230">API</text>
+
+  <rect class="component" x="370" y="185" width="160" height="90"/>
+  <use href="#component-mark" x="493" y="195" width="28" height="22"/>
+  <text class="name" x="450" y="230">Agente</text>
+
+  <rect class="component" x="580" y="185" width="160" height="90"/>
+  <use href="#component-mark" x="703" y="195" width="28" height="22"/>
+  <text class="name" x="660" y="230">Tools</text>
+
+  <rect class="component" x="790" y="185" width="180" height="90"/>
+  <use href="#component-mark" x="933" y="195" width="28" height="22"/>
+  <text class="name" x="880" y="230">Servicios</text>
+
+  <rect class="component" x="1020" y="185" width="210" height="90"/>
+  <use href="#component-mark" x="1193" y="195" width="28" height="22"/>
+  <text class="name" x="1125" y="230">Repositorios</text>
+
+  <rect class="component" x="350" y="440" width="200" height="90"/>
+  <use href="#component-mark" x="513" y="450" width="28" height="22"/>
+  <text class="name" x="450" y="485">Checkpointer</text>
+
+  <line class="connector flow" x1="118" y1="230" x2="160" y2="230"/>
+  <line class="connector flow" x1="320" y1="230" x2="370" y2="230"/>
+  <line class="connector flow" x1="530" y1="230" x2="580" y2="230"/>
+  <line class="connector flow" x1="740" y1="230" x2="790" y2="230"/>
+  <line class="connector flow" x1="970" y1="230" x2="1020" y2="230"/>
+  <line class="connector flow" x1="1230" y1="230" x2="1382" y2="230"/>
+
+  <line class="connector flow" x1="450" y1="185" x2="450" y2="88"/>
+  <line class="connector flow" x1="450" y1="275" x2="450" y2="440"/>
+  <line class="connector flow" x1="450" y1="530" x2="450" y2="682"/>
+  </g>
+</svg>

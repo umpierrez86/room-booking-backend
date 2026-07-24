@@ -29,6 +29,7 @@ class FakeClient:
         self.dataset = FakeDataset()
         self.examples = examples or []
         self.uploaded: list[dict[str, Any]] = []
+        self.updated: list[tuple[uuid.UUID, dict[str, Any]]] = []
         self.deleted: list[uuid.UUID] = []
 
     def has_dataset(self, *, dataset_name: str) -> bool:
@@ -48,6 +49,29 @@ class FakeClient:
         self, *, dataset_id: uuid.UUID, examples: list[dict[str, Any]]
     ) -> object:
         self.uploaded = examples
+        return object()
+
+    def update_example(
+        self,
+        example_id: uuid.UUID,
+        *,
+        inputs: dict[str, Any],
+        outputs: dict[str, Any],
+        metadata: dict[str, Any],
+        split: str,
+        dataset_id: uuid.UUID,
+    ) -> object:
+        self.updated.append(
+            (
+                example_id,
+                {
+                    "inputs": inputs,
+                    "outputs": outputs,
+                    "metadata": metadata,
+                    "split": split,
+                },
+            )
+        )
         return object()
 
     def delete_example(self, example_id: uuid.UUID) -> None:
@@ -78,6 +102,8 @@ def test_sync_deletes_only_stale_repository_managed_examples() -> None:
     sync_dataset(client, CASES)
 
     assert client.deleted == [stale.id]
+    assert [example_id for example_id, _ in client.updated] == [current.id]
+    assert len(client.uploaded) == len(CASES) - 1
 
 
 def test_sync_creates_dataset_when_missing() -> None:

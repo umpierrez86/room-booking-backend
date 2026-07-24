@@ -38,6 +38,17 @@ class LangSmithDatasetClient(Protocol):
         self, *, dataset_id: uuid.UUID, examples: list[dict[str, Any]]
     ) -> object: ...
 
+    def update_example(
+        self,
+        example_id: uuid.UUID,
+        *,
+        inputs: dict[str, Any],
+        outputs: dict[str, Any],
+        metadata: dict[str, Any],
+        split: str,
+        dataset_id: uuid.UUID,
+    ) -> object: ...
+
     def delete_example(self, example_id: uuid.UUID) -> None: ...
 
 
@@ -58,15 +69,30 @@ def sync_dataset(
         else client.create_dataset(DATASET_NAME, description=DATASET_DESCRIPTION)
     )
 
-    desired_ids = {stable_example_id(case["id"]) for case in case_list}
     existing = list(client.list_examples(dataset_id=dataset.id))
-    client.create_examples(
-        dataset_id=dataset.id,
-        examples=[_to_langsmith_example(case) for case in case_list],
-    )
+    existing_by_id = {example.id: example for example in existing}
+    desired = {
+        stable_example_id(case["id"]): _to_langsmith_example(case) for case in case_list
+    }
+    new_examples: list[dict[str, Any]] = []
+    for example_id, payload in desired.items():
+        if example_id not in existing_by_id:
+            new_examples.append(payload)
+            continue
+        client.update_example(
+            example_id,
+            inputs=payload["inputs"],
+            outputs=payload["outputs"],
+            metadata=payload["metadata"],
+            split=payload["split"],
+            dataset_id=dataset.id,
+        )
+    if new_examples:
+        client.create_examples(dataset_id=dataset.id, examples=new_examples)
+
     for example in existing:
         metadata = example.metadata or {}
-        if metadata.get("source") == MANAGED_SOURCE and example.id not in desired_ids:
+        if metadata.get("source") == MANAGED_SOURCE and example.id not in desired:
             client.delete_example(example.id)
     return dataset
 

@@ -14,6 +14,7 @@ from typing import Any
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langsmith import Client
 from langsmith.evaluation import evaluate
 
@@ -42,6 +43,7 @@ EXPERIMENT_PREFIX = "agent-regression"
 ROOM_CAPACITIES = {"A": 4, "B": 6, "C": 6, "D": 8, "E": 10}
 EVAL_THREAD_PREFIX = "eval"
 MAX_CONCURRENCY = 2
+REQUESTS_PER_SECOND = 0.15
 
 MIN_TOOL_ACCURACY = 0.90
 MIN_ARGUMENT_ACCURACY = 0.85
@@ -130,7 +132,9 @@ def _make_target(llm: BaseChatModel) -> Target:
 
 def _message_text(message: BaseMessage) -> str:
     text = getattr(message, "text", None)
-    return text() if callable(text) else str(text or message.content)
+    if isinstance(text, str):
+        return text
+    return text() if callable(text) else str(message.content)
 
 
 def correct_tool_selection(run: Any, example: Any) -> dict[str, Any]:
@@ -253,8 +257,16 @@ def _run_outputs(run: Any) -> dict[str, Any]:
 def run_evals() -> None:
     client = Client()
     sync_dataset(client, CASES)
-    target_model = init_chat_model(settings.llm_model)
-    judge_model = init_chat_model(os.getenv("EVAL_JUDGE_MODEL", settings.llm_model))
+    rate_limiter = InMemoryRateLimiter(
+        requests_per_second=REQUESTS_PER_SECOND,
+        check_every_n_seconds=0.1,
+        max_bucket_size=1,
+    )
+    target_model = init_chat_model(settings.llm_model, rate_limiter=rate_limiter)
+    judge_model = init_chat_model(
+        os.getenv("EVAL_JUDGE_MODEL", settings.llm_model),
+        rate_limiter=rate_limiter,
+    )
     results = evaluate(
         _make_target(target_model),
         data=DATASET_NAME,

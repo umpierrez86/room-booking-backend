@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from evals.run_evals import enforce_quality_gates
+from evals.run_evals import _message_text, enforce_quality_gates
 
 
 def _row(
@@ -105,3 +105,12 @@ def test_target_execution_error_fails_gate() -> None:
                 )
             ]
         )
+
+
+def test_message_text_does_not_call_string_compatible_accessor() -> None:
+    class CallableText(str):
+        def __call__(self) -> str:
+            raise AssertionError("deprecated callable accessor must not be used")
+
+    message = SimpleNamespace(text=CallableText("respuesta"), content="fallback")
+    assert _message_text(message) == "respuesta"

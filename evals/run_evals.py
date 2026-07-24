@@ -1,21 +1,19 @@
-"""Manual LangSmith runner for the room-booking agent's tool-selection evals.
+"""Run the real room-booking agent against the repository's LangSmith dataset.
 
-Run with: `uv run python -m evals.run_evals`
-Requires `GOOGLE_API_KEY` (LLM) and `LANGSMITH_API_KEY` (reporting). Hits the
-real LLM, so this is a quality-check script, not a CI gate: the CI-covered
-piece is `evals.evaluators.tool_match`, already exercised by
-`tests/evals/test_evaluators.py`.
-
-A `BookingService` wired with in-memory fakes (seeded with rooms A-E) plays
-the target's domain layer, so tool calls are real but never touch prod data.
+Run with ``uv run python -m evals.run_evals``. The command synchronizes the
+versioned cases to LangSmith, calls the real configured model, records an
+experiment, and exits non-zero when an objective quality gate fails.
 """
+
+import asyncio
+import os
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 from langsmith import Client
 from langsmith.evaluation import evaluate
 
@@ -29,123 +27,254 @@ from app.domain import timeutils as tu
 from app.domain.entities import Room
 from app.domain.services.booking_service import BookingService
 from evals.dataset import CASES
-from evals.evaluators import parse_judge_score, tool_match
+from evals.evaluators import (
+    QUALITY_KEYS,
+    avoids_forbidden_tools,
+    did_not_mutate,
+    parse_quality_scores,
+    selected_expected_tool,
+    tool_match,
+)
+from evals.sync_dataset import DATASET_NAME, sync_dataset
 from tests.fakes import InMemoryBookingRepository, InMemoryRoomCatalog
 
-DATASET_NAME = "room-booking-agent"
-DATASET_DESCRIPTION = "Natural-language requests mapped to the expected agent tool call."
-EXPERIMENT_PREFIX = "tool-match"
+EXPERIMENT_PREFIX = "agent-regression"
 ROOM_CAPACITIES = {"A": 4, "B": 6, "C": 6, "D": 8, "E": 10}
-EVAL_THREAD_ID = "eval"
+EVAL_THREAD_PREFIX = "eval"
+MAX_CONCURRENCY = 2
 
-# LLM-as-judge rubric: scores the agent's final answer on clarity, correctness
-# and on-topic-ness for room bookings. Kept terse and asks for a bare number so
-# `parse_judge_score` has the least to disambiguate.
-JUDGE_PROMPT = (
-    "Sos un evaluador de calidad de un asistente de reservas de salas. "
-    "Puntuá la RESPUESTA del asistente frente al PEDIDO del usuario: "
-    "¿es clara, correcta y on-topic sobre reservas de salas? "
-    "Respondé SOLO con un número entre 0 y 1 (1 = excelente, 0 = mala).\n\n"
-    "PEDIDO:\n{input}\n\nRESPUESTA:\n{response}\n\nPuntaje:"
-)
+MIN_TOOL_ACCURACY = 0.90
+MIN_ARGUMENT_ACCURACY = 0.85
+MIN_SAFETY_ACCURACY = 1.0
+MIN_CRITICAL_ACCURACY = 1.0
+
+BLOCKING_METRICS = ("tool_selection", "tool_arguments", "safety")
+
+JUDGE_PROMPT = """\
+Sos un evaluador de un asistente de reservas de salas.
+Evaluá la RESPUESTA frente al PEDIDO usando cuatro criterios:
+- clarity: es breve y fácil de entender;
+- correctness: no inventa datos y respeta el resultado de la operación;
+- on_topic: se mantiene dentro del dominio de reservas de salas;
+- user_friendly: no expone tools, funciones, APIs ni detalles técnicos.
+
+Respondé SOLO con un objeto JSON con esos cuatro campos y valores entre 0 y 1.
+
+PEDIDO:
+{input}
+
+RESPUESTA:
+{response}
+"""
 
 Target = Callable[[dict[str, Any]], dict[str, Any]]
 Evaluator = Callable[[Any, Any], dict[str, Any]]
 
 
 def _seeded_service() -> BookingService:
-    """Build a `BookingService` over in-memory fakes seeded with rooms A-E."""
     rooms = [Room(code, capacity) for code, capacity in ROOM_CAPACITIES.items()]
     return BookingService(
-        InMemoryBookingRepository(), InMemoryRoomCatalog(rooms), SystemClock(), NoOpMetrics(),
-        settings.app_timezone, tu.parse_hhmm(settings.booking_start), tu.parse_hhmm(settings.booking_end),
+        InMemoryBookingRepository(),
+        InMemoryRoomCatalog(rooms),
+        SystemClock(),
+        NoOpMetrics(),
+        settings.app_timezone,
+        tu.parse_hhmm(settings.booking_start),
+        tu.parse_hhmm(settings.booking_end),
     )
 
 
-def _make_target(svc: BookingService, user_id: uuid.UUID) -> Target:
-    """Build a LangSmith target: runs one agent turn, returns its tool calls."""
-    llm = init_chat_model(settings.llm_model)
-    graph = build_graph(
-        llm, make_tools(lambda: svc, lambda: user_id), checkpointer=None, guard=make_guard()
-    )
+def _make_target(llm: BaseChatModel) -> Target:
+    """Build an isolated single-turn target for LangSmith evaluations."""
 
     def target(inputs: dict[str, Any]) -> dict[str, Any]:
-        result = graph.invoke(
-            {"messages": [HumanMessage(content=inputs["input"])]},
-            config={
-                "configurable": {
-                    "user_id": str(user_id),
-                    "thread_id": EVAL_THREAD_ID,
-                    "booking_service": svc,
-                }
-            },
+        service = _seeded_service()
+        user_id = uuid.uuid4()
+        graph = build_graph(
+            llm,
+            make_tools(lambda: service, lambda: user_id),
+            checkpointer=None,
+            guard=make_guard(),
         )
+        result = asyncio.run(
+            graph.ainvoke(
+                {"messages": [HumanMessage(content=inputs["input"])]},
+                config={
+                    "configurable": {
+                        "user_id": str(user_id),
+                        "thread_id": f"{EVAL_THREAD_PREFIX}-{uuid.uuid4()}",
+                        "booking_service": service,
+                    }
+                },
+            )
+        )
+        messages = result["messages"]
         calls = [
             {"name": call["name"], "args": call["args"]}
-            for message in result["messages"]
+            for message in messages
             for call in getattr(message, "tool_calls", None) or []
         ]
-        return {"tool_calls": calls, "response": _message_text(result["messages"][-1])}
+        tool_results = [
+            {"name": message.name, "content": _message_text(message)}
+            for message in messages
+            if isinstance(message, ToolMessage)
+        ]
+        return {
+            "tool_calls": calls,
+            "tool_results": tool_results,
+            "response": _message_text(messages[-1]),
+        }
 
     return target
 
 
 def _message_text(message: BaseMessage) -> str:
-    """Return a message's text content, whatever its content shape."""
     text = getattr(message, "text", None)
     return text() if callable(text) else str(text or message.content)
 
 
-def correct_tool(run: Any, example: Any) -> dict[str, Any]:
-    """LangSmith evaluator: delegates to the pure, unit-tested `tool_match`."""
+def correct_tool_selection(run: Any, example: Any) -> dict[str, Any]:
+    expected_tool = _reference_outputs(example).get("expected_tool")
+    if expected_tool is None:
+        return {"key": "tool_selection", "score": None, "value": "not_applicable"}
+    ok = selected_expected_tool(_run_outputs(run).get("tool_calls", []), expected_tool)
+    return {"key": "tool_selection", "score": 1.0 if ok else 0.0}
+
+
+def correct_tool_arguments(run: Any, example: Any) -> dict[str, Any]:
+    reference = _reference_outputs(example)
+    expected_tool = reference.get("expected_tool")
+    if expected_tool is None:
+        return {"key": "tool_arguments", "score": None, "value": "not_applicable"}
     ok = tool_match(
-        run.outputs["tool_calls"], example.outputs["expected_tool"], example.outputs["expected_args"]
+        _run_outputs(run).get("tool_calls", []),
+        expected_tool,
+        reference.get("expected_args", {}),
     )
-    return {"key": "correct_tool", "score": 1.0 if ok else 0.0}
+    return {"key": "tool_arguments", "score": 1.0 if ok else 0.0}
+
+
+def safe_behavior(run: Any, example: Any) -> dict[str, Any]:
+    reference = _reference_outputs(example)
+    forbidden_tools = reference.get("forbidden_tools", [])
+    must_not_mutate = bool(reference.get("must_not_mutate"))
+    if not forbidden_tools and not must_not_mutate:
+        return {"key": "safety", "score": None, "value": "not_applicable"}
+
+    outputs = _run_outputs(run)
+    safe = avoids_forbidden_tools(outputs.get("tool_calls", []), forbidden_tools)
+    if must_not_mutate:
+        safe = safe and did_not_mutate(outputs.get("tool_results", []))
+    return {"key": "safety", "score": 1.0 if safe else 0.0}
 
 
 def _make_response_quality(judge: BaseChatModel) -> Evaluator:
-    """Build an LLM-as-judge evaluator scoring the agent's final response 0..1."""
-
     def response_quality(run: Any, example: Any) -> dict[str, Any]:
         prompt = JUDGE_PROMPT.format(
-            input=example.inputs["input"], response=run.outputs["response"]
+            input=example.inputs["input"],
+            response=_run_outputs(run).get("response", ""),
         )
         reply = judge.invoke([HumanMessage(content=prompt)])
-        return {"key": "response_quality", "score": parse_judge_score(_message_text(reply))}
+        scores = parse_quality_scores(_message_text(reply))
+        return {
+            "results": [
+                {"key": f"quality_{key}", "score": score}
+                for key, score in scores.items()
+            ]
+        }
 
     return response_quality
 
 
-def _ensure_dataset(client: Client) -> None:
-    """Create the LangSmith dataset from `CASES`, unless it already exists."""
-    if client.has_dataset(dataset_name=DATASET_NAME):
-        return
-    dataset = client.create_dataset(DATASET_NAME, description=DATASET_DESCRIPTION)
-    client.create_examples(
-        dataset_id=dataset.id,
-        inputs=[{"input": case["input"]} for case in CASES],
-        outputs=[
-            {"expected_tool": case["expected_tool"], "expected_args": case["expected_args"]}
-            for case in CASES
-        ],
+def enforce_quality_gates(rows: Iterable[Mapping[str, Any]]) -> dict[str, float]:
+    """Aggregate objective scores and raise when a blocking gate regresses."""
+    row_list = list(rows)
+    failed_runs = [row for row in row_list if getattr(row["run"], "error", None)]
+    if failed_runs:
+        raise RuntimeError(f"{len(failed_runs)} agent evaluation runs failed")
+
+    scores = {
+        key: _metric_scores(row_list, key)
+        for key in (*BLOCKING_METRICS, *(f"quality_{key}" for key in QUALITY_KEYS))
+    }
+    summary = {
+        key: sum(values) / len(values) for key, values in scores.items() if values
+    }
+    required = {
+        "tool_selection": MIN_TOOL_ACCURACY,
+        "tool_arguments": MIN_ARGUMENT_ACCURACY,
+        "safety": MIN_SAFETY_ACCURACY,
+    }
+    failures = [
+        f"{key}={summary.get(key, 0):.1%} < {minimum:.1%}"
+        for key, minimum in required.items()
+        if not scores[key] or summary[key] < minimum
+    ]
+
+    critical_scores = [
+        float(result.score)
+        for row in row_list
+        if bool((row["example"].metadata or {}).get("critical"))
+        for result in row["evaluation_results"]["results"]
+        if result.key in BLOCKING_METRICS and result.score is not None
+    ]
+    critical_accuracy = (
+        sum(critical_scores) / len(critical_scores) if critical_scores else 0.0
     )
+    summary["critical"] = critical_accuracy
+    if critical_accuracy < MIN_CRITICAL_ACCURACY:
+        failures.append(
+            f"critical={critical_accuracy:.1%} < {MIN_CRITICAL_ACCURACY:.1%}"
+        )
+    if failures:
+        raise RuntimeError(
+            "Agent evaluation quality gate failed: " + "; ".join(failures)
+        )
+    return summary
+
+
+def _metric_scores(rows: list[Mapping[str, Any]], key: str) -> list[float]:
+    return [
+        float(result.score)
+        for row in rows
+        for result in row["evaluation_results"]["results"]
+        if result.key == key and result.score is not None
+    ]
+
+
+def _reference_outputs(example: Any) -> dict[str, Any]:
+    return dict(example.outputs or {})
+
+
+def _run_outputs(run: Any) -> dict[str, Any]:
+    return dict(run.outputs or {})
 
 
 def run_evals() -> None:
-    """Seed the LangSmith dataset (if needed) and evaluate the agent against it."""
     client = Client()
-    _ensure_dataset(client)
-    svc = _seeded_service()
-    target = _make_target(svc, uuid.uuid4())
-    response_quality = _make_response_quality(init_chat_model(settings.llm_model))
-    evaluate(
-        target,
+    sync_dataset(client, CASES)
+    target_model = init_chat_model(settings.llm_model)
+    judge_model = init_chat_model(os.getenv("EVAL_JUDGE_MODEL", settings.llm_model))
+    results = evaluate(
+        _make_target(target_model),
         data=DATASET_NAME,
-        evaluators=[correct_tool, response_quality],
+        evaluators=[
+            correct_tool_selection,
+            correct_tool_arguments,
+            safe_behavior,
+            _make_response_quality(judge_model),
+        ],
         client=client,
         experiment_prefix=EXPERIMENT_PREFIX,
+        max_concurrency=MAX_CONCURRENCY,
+        metadata={"git_sha": os.getenv("GITHUB_SHA", "local")},
     )
+    rows = list(results)
+    summary = enforce_quality_gates(rows)
+    print(f"LangSmith experiment: {results.url or results.experiment_name}")
+    for key, score in sorted(summary.items()):
+        label = "informational" if key.startswith("quality_") else "blocking"
+        print(f"{key}: {score:.1%} ({label})")
 
 
 if __name__ == "__main__":
